@@ -1,0 +1,154 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-page text-ink font-sans antialiased;
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-primary ring-offset-2 rounded-[6px];
+  }
+
+  /* ซ่อนแถบเลื่อนของชิปกรองแนวนอน */
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+@layer components {
+  /* พื้นหลังหน้าเข้าสู่ระบบและหน้าข้อกำหนด
+     จอแนวนอนใช้ภาพแนวนอน จอมือถือแนวตั้งใช้ภาพแนวตั้ง จะได้ไม่ถูกครอปจนเสียองค์ประกอบ */
+  .auth-bg {
+    background-color: theme('colors.page');
+    background-image: url('/auth-bg.jpg');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+  }
+
+  @media (orientation: portrait) {
+    .auth-bg {
+      background-image: url('/auth-bg-tall.jpg');
+    }
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-pill px-5 h-11 text-[15px] font-semibold
+           transition-colors disabled:cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply btn bg-primary text-white hover:bg-primary-dark disabled:bg-[#C9CDCD] disabled:text-white;
+  }
+  .btn-gold {
+    @apply btn bg-gold text-white hover:brightness-95;
+  }
+  .btn-danger {
+    @apply btn bg-danger text-white hover:brightness-90 disabled:bg-[#C9CDCD] disabled:text-white;
+  }
+  .btn-ghost {
+    @apply btn border border-line bg-white text-slate hover:bg-primary-wash;
+  }
+  .btn-sm {
+    @apply h-9 px-4 text-sm;
+  }
+
+  .chip {
+    @apply shrink-0 rounded-pill border border-line bg-white px-3.5 py-1.5 text-sm text-slate transition-colors;
+  }
+  .chip-on {
+    @apply border-primary bg-primary text-white;
+  }
+
+  .card {
+    @apply rounded-card bg-white shadow-card;
+  }
+
+  .field {
+    @apply w-full rounded-[10px] border border-line bg-white px-3 py-2.5 text-[15px] text-ink
+           placeholder:text-muted/70 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20;
+  }
+  .label {
+    @apply mb-1.5 block text-sm font-medium text-slate;
+  }
+
+  .badge {
+    @apply inline-flex items-center rounded-pill px-2.5 py-0.5 text-2xs font-semibold;
+  }
+
+  /* หัวตารางฝั่งแอดมิน */
+  .th {
+    @apply bg-primary px-4 py-3 text-left text-sm font-semibold text-white whitespace-nowrap;
+  }
+  .td {
+    @apply border-b border-line px-4 py-3 text-sm text-slate whitespace-nowrap;
+  }
+}
+
+/* ป็อปอัปแจ้งเลื่อนระดับสมาชิก */
+@keyframes levelup-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes levelup-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.86) translateY(14px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes levelup-glow {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.75;
+    transform: scale(1.08);
+  }
+}
+
+@keyframes levelup-sparkle {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(0.85) rotate(0deg);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.1) rotate(12deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+

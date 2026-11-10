@@ -1,0 +1,54 @@
+# docker-compose สำหรับ server จริงในวง LAN
+# รัน:  docker compose -f docker-compose.prod.yml up -d --build
+#
+# ผู้ใช้เข้าที่  https://<IP ของเครื่อง>:4008
+# เปิดออกนอกเครื่องแค่พอร์ต 4008 — DB และ backend คุยกันภายใน docker เท่านั้น
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file: ./rewards.env        # POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    env_file: ./rewards.env        # DATABASE_URL, JWT_SECRET, PORT
+    environment:
+      TZ: Asia/Bangkok
+      PORT: 4007
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - uploads:/app/uploads
+    # เปิดเฉพาะในเครื่อง เอาไว้ไล่ปัญหาด้วย curl — ไม่เปิดออกวงแลน
+    ports:
+      - '127.0.0.1:4007:4007'
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # ปล่อยว่าง = ยิง API ที่ origin เดียวกับหน้าเว็บ แล้วให้ nginx ส่งต่อ
+        # ใช้ได้ทุกวงแลนโดยไม่ต้องรู้ IP ของ backend
+        VITE_API_URL: ''
+    restart: unless-stopped
+    ports:
+      - '4008:4008'
+    volumes:
+      - ./frontend/nginx.prod.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+  uploads:

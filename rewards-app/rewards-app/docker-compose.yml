@@ -1,0 +1,19 @@
+# ยก PostgreSQL สำหรับเครื่อง dev อย่างเดียว: docker compose up -d
+# ค่าตรงนี้ตรงกับ DATABASE_URL ใน backend/.env.example อยู่แล้ว
+# backend กับ frontend รันด้วย npm run dev (พอร์ต 4007 / 4008)
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: line-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: line
+    ports:
+      - '5432:5432'
+    volumes:
+      - line-pgdata:/var/lib/postgresql/data
+
+volumes:
+  line-pgdata:
