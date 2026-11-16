@@ -5,19 +5,19 @@ import { useAuth } from '../../context/AuthContext';
 import { Spinner } from '../../components/ui';
 import { thaiDate } from '../../lib/format';
 import PolicyBody from '../../components/PolicyBody';
-import { useT } from '../../lib/i18n';
+import { useLanguage } from '../../lib/i18n';
 
 export default function Terms() {
   const { acceptTerms } = useAuth();
   const navigate = useNavigate();
-  const t = useT();
+  const { t, lang } = useLanguage();
   const [policy, setPolicy] = useState(null);
   const [agreed, setAgreed] = useState(false);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     api.policy('privacy').then(({ policy }) => setPolicy(policy));
-  }, []);
+  }, [lang]);
 
   async function accept() {
     setBusy(true);

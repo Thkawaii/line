@@ -3,6 +3,7 @@ package controllers
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"log"
 	"math"
 
@@ -202,4 +203,113 @@ func notifyTierUp(tx *sql.Tx, userID int64, tier string) error {
 		"ยินดีด้วย คุณเลื่อนเป็นระดับ "+tier+" แล้ว",
 		"ระดับใหม่มาพร้อมตัวคูณคะแนนและสิทธิประโยชน์ที่มากขึ้น")
 	return err
+}
+
+/*
+คะแนนพิเศษ — กระเป๋าที่สองที่แยกจากคะแนนปกติ
+
+ต่างจากคะแนนปกติสามข้อ และตั้งใจให้ต่างแบบนี้
+  - ไม่คูณด้วยตัวคูณของระดับสมาชิก ผู้ดูแลตั้งให้เท่าไหร่ได้เท่านั้น
+    เพราะเป็นรางวัลเฉพาะกิจ ไม่ใช่ผลตอบแทนของความสม่ำเสมอ
+  - ไม่นำไปคิดระดับสมาชิก จึงไม่ต้องเรียก refreshTier
+  - ไม่ถูกตัดยอดตอนสิ้นปีพร้อมคะแนนปกติ
+
+เก็บรายการเดินบัญชีไว้เหมือนกัน แต่ติดธง point_kind = 'special'
+ประวัติคะแนนจึงแยกสองกระเป๋าออกจากกันได้
+*/
+
+// awardSpecialPoints บวกคะแนนพิเศษเข้าบัญชีพร้อมบันทึกรายการเดินบัญชี
+//
+// expireAt คือวันหมดอายุของคะแนนก้อนนี้ ส่ง nil มาได้ถ้าไม่กำหนด
+//
+// วันหมดอายุเก็บไว้ที่ผู้ใช้ค่าเดียว ไม่ได้แยกรายก้อน และจะ "เลื่อนออกไป" เสมอ
+// คือเก็บวันที่ไกลที่สุดไว้ เพราะพนักงานไม่ควรเสียคะแนนก้อนใหม่
+// เพียงเพราะก้อนเก่าใกล้หมดอายุ
+func awardSpecialPoints(tx *sql.Tx, userID int64, amount int, title string, expireAt any) error {
+	if amount <= 0 {
+		return nil
+	}
+
+	if _, err := tx.Exec(`
+		UPDATE users SET
+		  special_points = special_points + $2,
+		  special_points_expire_at = CASE
+		    WHEN $3::date IS NULL THEN special_points_expire_at
+		    WHEN special_points_expire_at IS NULL THEN $3::date
+		    ELSE GREATEST(special_points_expire_at, $3::date)
+		  END
+		WHERE id = $1`, userID, amount, expireAt); err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(`
+		INSERT INTO point_transactions (user_id, kind, source, title, points, point_kind)
+		VALUES ($1,'earn','event',$2,$3,'special')`, userID, title, amount); err != nil {
+		return err
+	}
+
+	_, err := tx.Exec(`
+		INSERT INTO notifications (user_id, category, title, body)
+		VALUES ($1,'point',$2,$3)`,
+		userID,
+		fmt.Sprintf("คุณได้รับคะแนนพิเศษ %d คะแนน", amount),
+		title)
+	return err
+}
+
+/*
+ExpireSpecialPoints ตัดยอดคะแนนพิเศษที่เลยวันหมดอายุแล้วให้เหลือ 0
+
+ทำงานสองทาง
+  - ตัวตั้งเวลาเรียกเป็นรอบ เพื่อให้รายงานและยอดรวมถูกต้องเสมอ
+  - เรียกเฉพาะรายคนตอนพนักงานเปิดแอป เพื่อให้ยอดที่เห็นตรงกับความจริงทันที
+    ไม่ต้องรอรอบถัดไป
+
+บันทึกรายการเดินบัญชีไว้ด้วยทุกครั้ง พนักงานจึงย้อนดูได้ว่าคะแนนหายไปเพราะหมดอายุ
+ไม่ใช่ระบบคำนวณผิด
+
+userID = 0 คือตัดยอดให้ทุกคน
+*/
+func ExpireSpecialPoints(userID int64) (int, error) {
+	filter := ""
+	args := []any{}
+	if userID > 0 {
+		filter = " AND id = $1"
+		args = append(args, userID)
+	}
+
+	/*
+		ทำสามอย่างในคำสั่งเดียวเพื่อให้เป็นอะตอมมิก
+		  expired  เลือกคนที่คะแนนพิเศษหมดอายุ พร้อมจำนวนก่อนถูกตัด
+		  cleared  ตัดยอดเหลือ 0 และล้างวันหมดอายุทิ้ง
+		  INSERT   บันทึกรายการเดินบัญชีเป็นยอดติดลบเท่ากับที่ถูกตัดไป
+
+		ต้องอ่านจำนวนไว้ใน CTE ก่อน เพราะหลัง UPDATE ยอดจะเป็น 0 แล้ว
+		อ่านทีหลังจะได้ 0 ทุกแถวและประวัติจะไม่มีความหมาย
+	*/
+	rows, err := config.DB.Query(`
+		WITH expired AS (
+		  SELECT id, special_points FROM users
+		  WHERE special_points > 0
+		    AND special_points_expire_at IS NOT NULL
+		    AND special_points_expire_at < CURRENT_DATE`+filter+`
+		),
+		cleared AS (
+		  UPDATE users u SET special_points = 0, special_points_expire_at = NULL
+		  FROM expired e WHERE u.id = e.id
+		)
+		INSERT INTO point_transactions (user_id, kind, source, title, points, point_kind)
+		SELECT id, 'adjust', 'system', 'คะแนนพิเศษหมดอายุ', -special_points, 'special'
+		FROM expired
+		RETURNING user_id`, args...)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	count := 0
+	for rows.Next() {
+		count++
+	}
+	return count, rows.Err()
 }

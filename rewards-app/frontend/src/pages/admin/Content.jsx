@@ -2,7 +2,15 @@ import { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import AdminShell from '../../components/AdminShell';
-import { Badge, ImagePlaceholder, Modal, Notice, Spinner, useToast } from '../../components/ui';
+import {
+  Badge,
+  ConfirmDialog,
+  ImagePlaceholder,
+  Modal,
+  Notice,
+  Spinner,
+  useToast,
+} from '../../components/ui';
 import ImageCropper from '../../components/ImageCropper';
 import TranslatedFields from '../../components/TranslatedFields';
 import { Icon } from '../../components/icons';
@@ -54,10 +62,13 @@ function BannerPage() {
     }
   }
 
-  async function remove(banner) {
-    if (!window.confirm(`ลบแบนเนอร์ "${banner.title}" ใช่ไหม`)) return;
-    await api.adminDeleteBanner(banner.id);
+  // เก็บรายการที่กำลังจะลบไว้ กล่องยืนยันจะได้เอาชื่อไปแสดงให้เห็นก่อนกดจริง
+  const [removing, setRemoving] = useState(null);
+
+  async function remove() {
+    await api.adminDeleteBanner(removing.id);
     toast('ลบแบนเนอร์แล้ว');
+    setRemoving(null);
     load();
   }
 
@@ -106,7 +117,7 @@ function BannerPage() {
                   <button onClick={() => start(banner)} className="text-primary">
                     แก้ไข
                   </button>
-                  <button onClick={() => remove(banner)} className="text-danger">
+                  <button onClick={() => setRemoving(banner)} className="text-danger">
                     ลบ
                   </button>
                 </div>
@@ -185,6 +196,15 @@ function BannerPage() {
           </div>
         </form>
       </Modal>
+
+      <ConfirmDialog
+        open={!!removing}
+        title={`ลบแบนเนอร์ "${removing?.title ?? ''}" ใช่ไหม`}
+        message="แบนเนอร์จะหายไปจากหน้าแรกของพนักงานทันที การลบย้อนกลับไม่ได้"
+        confirmLabel="ลบแบนเนอร์"
+        onConfirm={remove}
+        onCancel={() => setRemoving(null)}
+      />
     </AdminShell>
   );
 }
@@ -229,12 +249,15 @@ function FaqPage() {
     }
   }
 
-  async function remove(faq) {
-    if (!window.confirm('ลบคำถามนี้ใช่ไหม')) return;
-    await api.adminDeleteFaq(faq.id);
+  const [removingFaq, setRemovingFaq] = useState(null);
+
+  async function removeFaq() {
+    await api.adminDeleteFaq(removingFaq.id);
     toast('ลบคำถามแล้ว');
+    setRemovingFaq(null);
     load();
   }
+
 
   return (
     <AdminShell
@@ -273,7 +296,7 @@ function FaqPage() {
                         <button onClick={() => start(faq)} className="text-primary">
                           แก้ไข
                         </button>
-                        <button onClick={() => remove(faq)} className="text-danger">
+                        <button onClick={() => setRemovingFaq(faq)} className="text-danger">
                           ลบ
                         </button>
                       </div>
@@ -334,6 +357,15 @@ function FaqPage() {
           </div>
         </form>
       </Modal>
+
+      <ConfirmDialog
+        open={!!removingFaq}
+        title="ลบคำถามนี้ใช่ไหม"
+        message={removingFaq?.question ?? ''}
+        confirmLabel="ลบคำถาม"
+        onConfirm={removeFaq}
+        onCancel={() => setRemovingFaq(null)}
+      />
     </AdminShell>
   );
 }

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import AdminShell from '../../components/AdminShell';
+import { Select } from '../../components/ComboBox';
+import SpecialPoints, { SpecialPointIcon } from '../../components/SpecialPoints';
 import { Badge, ImagePlaceholder, Modal, Notice, Spinner, useToast } from '../../components/ui';
 import ImageCropper from '../../components/ImageCropper';
 import TranslatedFields from '../../components/TranslatedFields';
@@ -24,6 +26,7 @@ const EMPTY = {
   startsAt: '',
   endsAt: '',
   category: 'ทั่วไป',
+  pointKind: 'point',
   points: '',
   oldPoints: '',
   stock: '',
@@ -47,6 +50,7 @@ function RewardForm({ open, editing, onClose, onSaved }) {
             name: editing.name,
             imageUrl: editing.image_url || '',
             category: editing.category,
+            pointKind: editing.point_kind || 'point',
             points: editing.points,
             oldPoints: editing.old_points || '',
             stock: editing.stock,
@@ -112,8 +116,27 @@ function RewardForm({ open, editing, onClose, onSaved }) {
             <input id="stock" type="number" min="0" className="field" value={form.stock} onChange={set('stock')} />
           </div>
           <div>
+            <label className="label" htmlFor="pointKind">
+              แลกด้วยคะแนนแบบไหน
+            </label>
+            {/* ของรางวัลชิ้นหนึ่งแลกด้วยกระเป๋าเดียว ไม่ผสมสองกระเป๋า
+                เพราะถ้าผสมแล้วพนักงานจะเดาไม่ออกว่าตัวเองจ่ายอะไรไปเท่าไหร่ */}
+            <Select
+              id="pointKind"
+              options={[
+                { value: 'point', label: 'คะแนนปกติ' },
+                { value: 'special', label: 'คะแนนพิเศษ' },
+              ]}
+              value={form.pointKind}
+              onChange={(value) => setForm({ ...form, pointKind: value })}
+            />
+          </div>
+          <div>
             <label className="label" htmlFor="points">
-              คะแนนที่ใช้แลก *
+              <span className="inline-flex items-center gap-1.5">
+                {form.pointKind === 'special' && <SpecialPointIcon size={18} />}
+                {form.pointKind === 'special' ? 'คะแนนพิเศษที่ใช้แลก *' : 'คะแนนที่ใช้แลก *'}
+              </span>
             </label>
             <input id="points" type="number" min="1" className="field" value={form.points} onChange={set('points')} required />
           </div>
@@ -127,21 +150,31 @@ function RewardForm({ open, editing, onClose, onSaved }) {
             <label className="label" htmlFor="minTier">
               ระดับขั้นต่ำที่แลกได้
             </label>
-            <select id="minTier" className="field" value={form.minTier} onChange={set('minTier')}>
-              <option value="Member">Member — ทุกคนแลกได้</option>
-              <option value="Silver">Silver ขึ้นไป</option>
-              <option value="Elite">Elite เท่านั้น</option>
-            </select>
+            <Select
+              id="minTier"
+              options={[
+                { value: 'Member', label: 'Member — ทุกคนแลกได้' },
+                { value: 'Silver', label: 'Silver ขึ้นไป' },
+                { value: 'Elite', label: 'Elite เท่านั้น' },
+              ]}
+              value={form.minTier}
+              onChange={(value) => setForm({ ...form, minTier: value })}
+            />
           </div>
 
           <div>
             <label className="label" htmlFor="status">
               สถานะ
             </label>
-            <select id="status" className="field" value={form.status} onChange={set('status')}>
-              <option value="active">แสดงในแอป</option>
-              <option value="hidden">ซ่อน</option>
-            </select>
+            <Select
+              id="status"
+              options={[
+                { value: 'active', label: 'แสดงในแอป' },
+                { value: 'hidden', label: 'ซ่อน' },
+              ]}
+              value={form.status}
+              onChange={(value) => setForm({ ...form, status: value })}
+            />
           </div>
 
           <div className="sm:col-span-2">
@@ -294,7 +327,13 @@ export default function AdminRewards() {
                       </td>
                       <td className="td max-w-xs truncate">{reward.name}</td>
                       <td className="td">{reward.category}</td>
-                      <td className="td">{num(reward.points)}</td>
+                      <td className="td">
+                        {reward.point_kind === 'special' ? (
+                          <SpecialPoints value={reward.points} size="sm" />
+                        ) : (
+                          num(reward.points)
+                        )}
+                      </td>
                       <td className="td">
                         <Badge
                           className={

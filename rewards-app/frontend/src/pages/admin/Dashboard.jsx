@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../lib/api';
 import AdminShell from '../../components/AdminShell';
+import { Select } from '../../components/ComboBox';
 import { Badge, Modal, ProgressBar, Spinner } from '../../components/ui';
 import { Icon } from '../../components/icons';
 import { dateRange, dateTime, num } from '../../lib/format';
@@ -211,14 +212,33 @@ const MONTH_OPTIONS = [
 // ปี พ.ศ. 2565 ถึง 2600 เก็บเป็น ค.ศ. ในตัวแปร แล้วค่อยบวก 543 ตอนแสดง
 const YEAR_OPTIONS = Array.from({ length: 2600 - 2565 + 1 }, (_, i) => 2565 + i - 543);
 
+// ตัวเลือกเดือนสำหรับช่องเลือก ค่าเป็นข้อความเพราะ Select เทียบค่าแบบตรงตัว
+const monthChoices = MONTH_OPTIONS.map((m, i) => ({ value: String(i + 1), label: m }));
+
 const MONTH_LABELS = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
 const monthLabel = (value) => MONTH_LABELS[Number(String(value).slice(5, 7)) - 1] || value;
 
-function Panel({ title, action, children, className = '' }) {
+function Panel({ title, hint, action, children, className = '' }) {
   return (
     <section className={`card p-4 ${className}`}>
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <h3 className="font-semibold text-ink">{title}</h3>
+      {/* ปล่อยให้คำอธิบายสีตกลงบรรทัดใหม่ทั้งก้อนเมื่อการ์ดแคบ
+          ดีกว่าบีบจนคำว่า "คะแนนที่แจก" ขึ้นบรรทัดใหม่กลางคำ */}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+        <h3 className="flex items-center gap-1.5 font-semibold text-ink">
+          {title}
+          {/* ไอคอนคำอธิบาย ชี้ค้างแล้วเห็นว่าตัวเลขในกราฟคิดมาจากอะไร
+              ใส่เป็น title ของปุ่ม เบราว์เซอร์จึงแสดงให้เองโดยไม่ต้องเขียน tooltip */}
+          {hint && (
+            <button
+              type="button"
+              title={hint}
+              aria-label={hint}
+              className="text-primary"
+            >
+              <Icon.Alert size={16} />
+            </button>
+          )}
+        </h3>
         {action}
       </div>
       {children}
@@ -258,12 +278,12 @@ function AnalyticsTab() {
     api.adminAnalytics(filters).then(setData);
   }, [filters]);
 
-  const set = (key) => (e) => setFilters((f) => ({ ...f, [key]: e.target.value }));
+  // Select ของระบบคืนค่าที่เลือกมาตรง ๆ ไม่ใช่ event เหมือน <select> ของเบราว์เซอร์
+  const pick = (key) => (value) => setFilters((f) => ({ ...f, [key]: value }));
 
   if (!data) return <Spinner />;
 
   const { events, points } = data;
-  const maxJoined = Math.max(1, ...data.topEvents.map((e) => e.joined));
 
   return (
     <div className="space-y-8">
@@ -271,63 +291,67 @@ function AnalyticsTab() {
       <div className="flex flex-wrap items-center justify-end gap-x-6 gap-y-3">
         <label className="flex items-center gap-2 text-sm text-slate">
           ช่วงวันที่
-          <select className="field h-9 w-32 py-0" value={filters.range} onChange={set('range')}>
-            {RANGES.map((r) => (
-              <option key={r.value} value={r.value}>
-                {r.label}
-              </option>
-            ))}
-          </select>
+          <div className="w-32">
+            <Select options={RANGES} value={filters.range} onChange={pick('range')} />
+          </div>
         </label>
 
         {/* เลือกเองว่าปีไหน เดือนไหนถึงเดือนไหน โผล่เฉพาะตอนเลือกกำหนดเอง */}
         {filters.range === 'custom' && (
           <div className="flex flex-wrap items-center gap-2 text-sm text-slate">
-            <select className="field h-9 w-24 py-0" value={filters.year} onChange={set('year')}>
-              {YEAR_OPTIONS.map((y) => (
-                <option key={y} value={y}>
-                  {y + 543}
-                </option>
-              ))}
-            </select>
-            <select className="field h-9 w-32 py-0" value={filters.fromMonth} onChange={set('fromMonth')}>
-              {MONTH_OPTIONS.map((m, i) => (
-                <option key={m} value={i + 1}>
-                  {m}
-                </option>
-              ))}
-            </select>
+            <div className="w-24">
+              <Select
+                options={YEAR_OPTIONS.map((y) => ({ value: String(y), label: String(y + 543) }))}
+                value={String(filters.year)}
+                onChange={pick('year')}
+              />
+            </div>
+            <div className="w-32">
+              <Select
+                options={monthChoices}
+                value={String(filters.fromMonth)}
+                onChange={pick('fromMonth')}
+              />
+            </div>
             ถึง
-            <select className="field h-9 w-32 py-0" value={filters.toMonth} onChange={set('toMonth')}>
-              {MONTH_OPTIONS.map((m, i) => (
-                <option key={m} value={i + 1}>
-                  {m}
-                </option>
-              ))}
-            </select>
+            <div className="w-32">
+              <Select
+                options={monthChoices}
+                value={String(filters.toMonth)}
+                onChange={pick('toMonth')}
+              />
+            </div>
           </div>
         )}
 
         <label className="flex items-center gap-2 text-sm text-slate">
           แผนก
-          <select className="field h-9 w-36 py-0" value={filters.department} onChange={set('department')}>
-            <option value="all">ทั้งหมด</option>
-            {data.departmentOptions.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
+          <div className="w-36">
+            <Select
+              options={[
+                { value: 'all', label: 'ทั้งหมด' },
+                ...data.departmentOptions.map((name) => ({ value: name, label: name })),
+              ]}
+              value={filters.department}
+              onChange={pick('department')}
+            />
+          </div>
         </label>
 
         <label className="flex items-center gap-2 text-sm text-slate">
           ระดับสมาชิก
-          <select className="field h-9 w-36 py-0" value={filters.tier} onChange={set('tier')}>
-            <option value="all">ทั้งหมด</option>
-            <option value="Member">Member</option>
-            <option value="Silver">Silver</option>
-            <option value="Elite">Elite</option>
-          </select>
+          <div className="w-36">
+            <Select
+              options={[
+                { value: 'all', label: 'ทั้งหมด' },
+                { value: 'Member', label: 'Member' },
+                { value: 'Silver', label: 'Silver' },
+                { value: 'Elite', label: 'Elite' },
+              ]}
+              value={filters.tier}
+              onChange={pick('tier')}
+            />
+          </div>
         </label>
       </div>
 
@@ -343,13 +367,23 @@ function AnalyticsTab() {
         </div>
 
         <div className="mt-4 grid gap-4 xl:grid-cols-2">
-          <Panel title="แนวโน้มอัตราการเข้าร่วมกิจกรรม">
+          <Panel
+            title="แนวโน้มอัตราการเข้าร่วมกิจกรรม"
+            hint="อัตราเข้าร่วม (รายเดือน) = (จำนวนผู้เข้าร่วมเฉลี่ยต่อกิจกรรมในเดือนนั้น / จำนวนพนักงานทั้งหมด) × 100"
+          >
             <LineChart
-              data={data.attendanceTrend.map((row) => ({ label: monthLabel(row.month), value: row.rate }))}
+              data={data.attendanceTrend.map((row) => ({
+                label: monthLabel(row.month),
+                value: row.rate,
+                hasData: row.has_data,
+              }))}
             />
           </Panel>
 
-          <Panel title="กิจกรรมที่ได้รับความสนใจสูงสุด">
+          <Panel
+            title="กิจกรรมที่ได้รับความสนใจสูงสุด"
+            hint="กิจกรรมที่ได้รับความสนใจสูงสุด = (จำนวนผู้ลงทะเบียนในกิจกรรมนั้น / จำนวนพนักงานทั้งหมด) × 100"
+          >
             {data.topEvents.length === 0 ? (
               <p className="py-10 text-center text-sm text-muted">ยังไม่มีข้อมูลในช่วงนี้</p>
             ) : (
@@ -362,14 +396,19 @@ function AnalyticsTab() {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-baseline justify-between gap-2">
                         <p className="truncate text-sm font-medium text-ink">{row.title}</p>
-                        <span className="shrink-0 text-2xs text-muted">{num(row.joined)} คน</span>
+                        <span className="shrink-0 text-2xs text-muted">
+                          {num(row.joined)} จาก {num(row.audience)} คน
+                        </span>
                       </div>
                       <div className="mt-1">
-                        <RankBar value={row.joined} max={maxJoined} />
+                        {/* แถบกับเปอร์เซ็นต์ใช้ตัวหารเดียวกัน (พนักงานทั้งหมด)
+                            เดิมแถบเทียบกับกิจกรรมอันดับหนึ่ง ส่วนเปอร์เซ็นต์หารด้วย capacity
+                            สองอย่างจึงไม่ตรงกันเลย */}
+                        <RankBar value={row.joined} max={row.audience} />
                       </div>
                     </div>
-                    <span className="w-12 shrink-0 text-right text-sm font-semibold text-ink">
-                      {row.fill_rate}%
+                    <span className="w-14 shrink-0 text-right text-sm font-semibold text-ink">
+                      {row.rate}%
                     </span>
                   </li>
                 ))}
@@ -395,11 +434,22 @@ function AnalyticsTab() {
             <p className="mt-3 text-center text-2xs text-muted">กดที่ช่วงเพื่อดูว่ามีใครบ้าง</p>
           </Panel>
 
-          <Panel title="อัตราการมีส่วนร่วมตามแผนก">
+          <Panel
+            title="อัตราการมีส่วนร่วมตามแผนก"
+            hint="อัตราการมีส่วนร่วมเฉลี่ยตามแผนก = (จำนวนผู้เข้าร่วมเฉลี่ยต่อกิจกรรมของแผนก / จำนวนพนักงานทั้งหมดในแผนก) × 100"
+          >
             {data.departments.length === 0 ? (
               <p className="py-10 text-center text-sm text-muted">ยังไม่มีข้อมูลแผนก</p>
             ) : (
-              <ul className="space-y-3">
+              /*
+                แสดงสี่แผนกแรกในกรอบที่เห็น ที่เหลือเลื่อนดูในกล่องเดียวกัน
+                โรงงานมีสามสิบกว่าแผนก ถ้าปล่อยยาวทั้งหมดการ์ดใบนี้จะสูงกว่า
+                การ์ดข้าง ๆ หลายเท่า แล้วหน้าจอทั้งหน้าจะเสียสมดุล
+
+                ความสูงคิดจากสี่แถวพอดี ผู้ใช้จึงเห็นว่ายังมีต่ออีกข้างล่าง
+                ไม่ใช่คิดว่ามีแค่นี้
+              */
+              <ul className="max-h-[17.5rem] space-y-3 overflow-y-auto pr-1">
                 {data.departments.map((row) => (
                   <li key={row.department}>
                     <div className="flex items-baseline justify-between gap-2">
@@ -410,7 +460,10 @@ function AnalyticsTab() {
                       <RankBar value={row.rate} />
                     </div>
                     <p className="mt-0.5 text-2xs text-muted">
-                      เข้าร่วม {num(row.joined)} จาก {num(row.people)} คน
+                      {/* เขียนด้วยตัวเลขดิบ ผู้อ่านจึงคำนวณตามได้ตรงกับอัตราที่แสดง
+                          ถ้าเขียนเป็นค่าเฉลี่ย เลขจะมีเศษที่ปัดยังไงก็ไม่ลงตัว */}
+                      เข้าร่วมรวม {num(row.attendances)} ครั้ง จาก {num(row.events)} กิจกรรม ·
+                      ทั้งแผนก {num(row.people)} คน
                     </p>
                   </li>
                 ))}
@@ -427,13 +480,18 @@ function AnalyticsTab() {
         <div className="grid gap-4 xl:grid-cols-2">
           <Panel
             title="การเคลื่อนไหวของคะแนน"
+            hint="เส้น = คะแนนที่แจก + คะแนนที่ใช้"
             action={
-              <span className="flex items-center gap-3 text-2xs text-muted">
-                <span className="flex items-center gap-1">
-                  <span className="h-2 w-2 rounded-sm bg-primary" /> คะแนนที่แจก
+              <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs text-muted">
+                {/* whitespace-nowrap กันไม่ให้ชื่อแต่ละอันถูกตัดกลางคำตอนการ์ดแคบ */}
+                <span className="flex items-center gap-1 whitespace-nowrap">
+                  <span className="h-2.5 w-2.5 rounded-sm bg-[#1FC2A0]" /> คะแนนที่แจก
                 </span>
-                <span className="flex items-center gap-1">
-                  <span className="h-2 w-2 rounded-sm bg-[#3B82F6]" /> คะแนนที่ใช้
+                <span className="flex items-center gap-1 whitespace-nowrap">
+                  <span className="h-2.5 w-2.5 rounded-sm bg-[#3B6DF5]" /> คะแนนที่ใช้
+                </span>
+                <span className="flex items-center gap-1 whitespace-nowrap">
+                  <span className="h-0.5 w-4 rounded-full bg-primary" /> เคลื่อนไหวรวม
                 </span>
               </span>
             }
@@ -443,6 +501,8 @@ function AnalyticsTab() {
                 label: monthLabel(row.month),
                 given: row.given,
                 used: row.used,
+                balance: row.balance,
+                hasData: row.has_data,
               }))}
             />
           </Panel>

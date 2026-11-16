@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	"rewards/bootstrap"
@@ -39,6 +40,35 @@ func startAnnualResetWatcher() {
 	}()
 }
 
+// translationInterval อ่านระยะห่างระหว่างรอบแปลจาก TRANSLATE_INTERVAL (หน่วยวินาที)
+//
+// ค่าเริ่มต้น 60 วินาที ถือว่าเร็วพอสำหรับงานจริง — ผู้ดูแลบันทึกของรางวัลใหม่
+// แล้วรออีกไม่ถึงนาทีคำแปลก็ขึ้น และไม่ถี่จนยิงบริการแปลบ่อยเกินจำเป็น
+// startSpecialPointsWatcher ตัดยอดคะแนนพิเศษที่หมดอายุเป็นรอบ
+//
+// ยอดของพนักงานแต่ละคนถูกตัดตอนเปิดแอปอยู่แล้ว ตัวนี้มีไว้ให้รายงานฝั่งผู้ดูแล
+// และยอดรวมถูกต้องด้วย แม้พนักงานคนนั้นจะไม่ได้เปิดแอปเลย
+func startSpecialPointsWatcher() {
+	go func() {
+		for {
+			if count, err := controllers.ExpireSpecialPoints(0); err != nil {
+				log.Printf("ตัดยอดคะแนนพิเศษที่หมดอายุไม่สำเร็จ: %v", err)
+			} else if count > 0 {
+				log.Printf("คะแนนพิเศษหมดอายุ: ตัดยอด %d บัญชี", count)
+			}
+			time.Sleep(time.Hour)
+		}
+	}()
+}
+
+func translationInterval() time.Duration {
+	seconds, err := strconv.Atoi(config.Getenv("TRANSLATE_INTERVAL", "60"))
+	if err != nil || seconds < 10 {
+		seconds = 60
+	}
+	return time.Duration(seconds) * time.Second
+}
+
 func main() {
 	config.LoadEnv()
 
@@ -56,6 +86,9 @@ func main() {
 	if setup.CreatedDatabase {
 		log.Printf("สร้างฐานข้อมูล %q ให้แล้ว", config.DatabaseName())
 	}
+	for _, name := range setup.Migrations {
+		log.Printf("ต่อเติมโครงตาราง: %s", name)
+	}
 	if setup.CreatedTables {
 		log.Println("สร้างตารางให้แล้ว")
 		bootstrap.RunOrLog()
@@ -71,6 +104,14 @@ func main() {
 	}
 
 	startAnnualResetWatcher()
+
+	// ตัวแปลเนื้อหาอัตโนมัติ ทำงานเบื้องหลังตลอดเวลาที่เซิร์ฟเวอร์เปิดอยู่
+	// รอบแรกจะไล่แปลข้อมูลเก่าที่ยังไม่มีคำแปลให้เองโดยไม่ต้องสั่งอะไร
+	controllers.StartTranslationWorker(translationInterval())
+
+	// ตัดยอดคะแนนพิเศษที่เลยวันหมดอายุ
+	// ตรวจทุกชั่วโมง ก็พอสำหรับงานที่นับเป็นวัน และไม่กินแรงเครื่อง
+	startSpecialPointsWatcher()
 
 	port := config.Getenv("PORT", "4007")
 

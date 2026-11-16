@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../../lib/api';
 import AdminShell from '../../components/AdminShell';
+import ComboBox, { Select } from '../../components/ComboBox';
+import { useAuth } from '../../context/AuthContext';
+import { useOrgOptions } from '../../lib/useOrgOptions';
 import {
   Avatar,
   Badge,
@@ -301,6 +304,7 @@ const EMPTY_FORM = {
 
 function EmployeeForm({ open, onClose, editing, onSaved }) {
   const toast = useToast();
+  const org = useOrgOptions();
   const [form, setForm] = useState(EMPTY_FORM);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -331,6 +335,29 @@ function EmployeeForm({ open, onClose, editing, onSaved }) {
 
   async function submit(event) {
     event.preventDefault();
+
+    /*
+      ตรวจช่ององค์กรเองก่อนส่ง
+
+      สามช่องนี้ใช้ ComboBox ที่เป็นปุ่มกับรายการ ไม่ใช่ <input> ของเบราว์เซอร์
+      จึงใส่ required ให้เบราว์เซอร์ช่วยตรวจไม่ได้ ต้องตรวจเองตรงนี้
+
+      ที่ต้องบังคับกรอกเพราะทั้งสามค่านี้ถูกใช้จริง
+        ตำแหน่งกับแผนก ตัดสินสิทธิ์เข้าหลังบ้านและสิทธิ์ปรับคะแนน
+        แผนกกับสาขา    เป็นคอลัมน์ Section และ Location ในรายงานสรุป
+      ปล่อยว่างไว้แล้วพนักงานคนนั้นจะไปโผล่ในแถว "-" ของรายงาน
+    */
+    const missing = [
+      !form.position.trim() && 'ตำแหน่ง',
+      !form.department.trim() && 'แผนก',
+      !form.branch.trim() && 'สาขา',
+    ].filter(Boolean);
+
+    if (missing.length > 0) {
+      setError(`กรุณาเลือก${missing.join(' / ')}ก่อนบันทึก`);
+      return;
+    }
+
     setBusy(true);
     setError('');
     try {
@@ -370,6 +397,8 @@ function EmployeeForm({ open, onClose, editing, onSaved }) {
             <label className="label" htmlFor="employeeCode">
               รหัสพนักงาน *
             </label>
+            {/* ตั้งได้ตอนเพิ่มเท่านั้น แก้ภายหลังไม่ได้
+                เพราะรหัสนี้ใช้เข้าสู่ระบบด้วย เปลี่ยนแล้วพนักงานจะล็อกอินไม่ได้ */}
             <input
               id="employeeCode"
               className="field"
@@ -426,41 +455,68 @@ function EmployeeForm({ open, onClose, editing, onSaved }) {
         <div className="mt-3 grid gap-4 sm:grid-cols-2">
           <div>
             <label className="label" htmlFor="position">
-              ตำแหน่ง
+              ตำแหน่ง *
             </label>
-            <input id="position" className="field" value={form.position} onChange={set('position')} />
+            {/* รายการยาว 34 รายการ จึงใช้ช่องที่พิมพ์ค้นหาได้แทนการเลื่อนหา
+                ค่าที่ไม่มีในรายการเลือก "อื่นๆ" แล้วพิมพ์เองได้ */}
+            <ComboBox
+              id="position"
+              options={org.positions}
+              value={form.position}
+              onChange={(value) => setForm((f) => ({ ...f, position: value }))}
+              placeholder="พิมพ์เพื่อค้นหาตำแหน่ง"
+            />
           </div>
           <div>
             <label className="label" htmlFor="department">
-              แผนก
+              แผนก *
             </label>
-            <input id="department" className="field" value={form.department} onChange={set('department')} />
+            <ComboBox
+              id="department"
+              options={org.sections}
+              value={form.department}
+              onChange={(value) => setForm((f) => ({ ...f, department: value }))}
+              placeholder="พิมพ์เพื่อค้นหาแผนก"
+            />
           </div>
           <div>
             <label className="label" htmlFor="branch">
-              สาขา
+              สาขา *
             </label>
-            <input id="branch" className="field" value={form.branch} onChange={set('branch')} />
+            <ComboBox
+              id="branch"
+              options={org.branches}
+              value={form.branch}
+              onChange={(value) => setForm((f) => ({ ...f, branch: value }))}
+              placeholder="เลือกสาขา"
+            />
           </div>
           <div>
             <label className="label" htmlFor="tier">
               ระดับสมาชิก
             </label>
-            <select id="tier" className="field" value={form.tier} onChange={set('tier')}>
-              {['Member', 'Silver', 'Elite'].map((t) => (
-                <option key={t}>{t}</option>
-              ))}
-            </select>
+            {/*
+              ระดับสมาชิกแก้ด้วยมือไม่ได้ เพราะระบบคำนวณจากคะแนนตลอดเวลา
+
+              เดิมเป็นช่องให้เลือก แต่พอตั้งค่าที่ขัดกับคะแนน ระบบจะคำนวณทับทันที
+              ที่พนักงานเปิดแอป ผู้ดูแลจึงเห็นว่า "กดแล้วไม่เปลี่ยน" ทั้งที่บันทึกสำเร็จ
+
+              จะเลื่อนระดับให้ใคร ให้ปรับคะแนนแทน ซึ่งเปลี่ยนระดับให้เองและอยู่ถาวร
+            */}
+            <p className="field flex items-center bg-page text-slate">
+              {form.tier || 'Member'}
+            </p>
           </div>
           <div>
             <label className="label" htmlFor="status">
               สถานะ
             </label>
-            <select id="status" className="field" value={form.status} onChange={set('status')}>
-              {['Active', 'Inactive'].map((s) => (
-                <option key={s}>{s}</option>
-              ))}
-            </select>
+            <Select
+              id="status"
+              options={['Active', 'Inactive']}
+              value={form.status}
+              onChange={(value) => setForm((f) => ({ ...f, status: value }))}
+            />
           </div>
 
         </div>
@@ -480,6 +536,13 @@ function EmployeeForm({ open, onClose, editing, onSaved }) {
 
 function EmployeeDetail({ id, onClose, onEdit, onDeleted }) {
   const toast = useToast();
+
+  // ลบพนักงานได้เฉพาะผู้ดูแลระบบ บัญชีอื่นจะไม่เห็นปุ่มนี้เลย
+  // การลบย้อนกลับไม่ได้และพาประวัติคะแนนหายไปด้วย จึงไม่ควรอยู่ในมือหลายคน
+  // เซิร์ฟเวอร์กันไว้อีกชั้นที่ RequireAdmin ของเส้นทางลบ
+  const { user: me } = useAuth();
+  const canDelete = me?.role === 'admin';
+
   const [data, setData] = useState(null);
   const [tab, setTab] = useState('info');
   const [deleting, setDeleting] = useState(false);
@@ -537,9 +600,15 @@ function EmployeeDetail({ id, onClose, onEdit, onDeleted }) {
             <button onClick={() => onEdit(data.user)} className="btn-primary btn-sm">
               แก้ไขข้อมูล
             </button>
-            <button onClick={() => setConfirmOpen(true)} disabled={deleting} className="btn-danger btn-sm">
-              {deleting ? 'กำลังลบ' : 'ลบพนักงาน'}
-            </button>
+            {canDelete && (
+              <button
+                onClick={() => setConfirmOpen(true)}
+                disabled={deleting}
+                className="btn-danger btn-sm"
+              >
+                {deleting ? 'กำลังลบ' : 'ลบพนักงาน'}
+              </button>
+            )}
           </div>
 
           <div className="mt-5 flex gap-5 border-b border-line">
@@ -833,14 +902,14 @@ export default function Employees() {
           ].map((filter) => (
             <label key={filter.key} className="flex items-center gap-2">
               <span className="text-slate">{filter.label}</span>
-              <select value={filters[filter.key]} onChange={setFilter(filter.key)} className="field h-9 w-36 py-0">
-                <option value="">ทั้งหมด</option>
-                {filter.options.map((opt) => (
-                  <option key={opt} value={opt}>
-                    {opt}
-                  </option>
-                ))}
-              </select>
+              <div className="w-36">
+                <Select
+                  options={[{ value: '', label: 'ทั้งหมด' }, ...filter.options]}
+                  value={filters[filter.key]}
+                  onChange={(value) => setFilter(filter.key)({ target: { value } })}
+                  placeholder="ทั้งหมด"
+                />
+              </div>
             </label>
           ))}
 
@@ -911,18 +980,16 @@ export default function Employees() {
               <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line">
                 <label className="flex items-center gap-2 px-4 text-sm text-slate">
                   แสดงต่อหน้า
-                  <select
-                    value={limit}
-                    onChange={(e) => {
-                      setLimit(Number(e.target.value));
-                      setPage(1);
-                    }}
-                    className="field h-8 w-20 py-0"
-                  >
-                    {[10, 20, 50].map((n) => (
-                      <option key={n}>{n}</option>
-                    ))}
-                  </select>
+                  <div className="w-24">
+                    <Select
+                      options={['10', '20', '50']}
+                      value={String(limit)}
+                      onChange={(value) => {
+                        setLimit(Number(value));
+                        setPage(1);
+                      }}
+                    />
+                  </div>
                   รายการ
                 </label>
                 <Pagination page={data.page} total={data.total} limit={data.limit} onChange={setPage} />

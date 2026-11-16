@@ -6,9 +6,10 @@
   "scripts": {
     "dev": "vite",
     "dev:https": "node scripts/dev-https.mjs",
-    "build": "vite build",
+    "build": "node scripts/check-imports.mjs && vite build",
     "preview": "vite preview",
-    "build:test": "BUNDLE=single vite build"
+    "build:test": "BUNDLE=single vite build",
+    "check": "node scripts/check-imports.mjs"
   },
   "dependencies": {
     "jspdf": "^4.2.1",

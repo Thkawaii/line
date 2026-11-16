@@ -236,6 +236,16 @@ func AdminEmployee(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+/*
+ระดับสมาชิกไม่รับจากฟอร์มแก้ไขพนักงาน
+
+ระบบคำนวณระดับจากคะแนนตลอดเวลา ตั้งค่าที่ขัดกับคะแนนจึงอยู่ได้ไม่นาน
+พอพนักงานเปิดแอปครั้งถัดไป ระบบจะคำนวณทับทันที
+ผู้ดูแลเห็นว่า "กดแล้วไม่เปลี่ยน" ทั้งที่บันทึกสำเร็จ ซึ่งสับสนกว่าการไม่ให้แก้เลย
+
+ต้องการเลื่อนระดับให้ใคร ให้ปรับคะแนนแทน ซึ่งเปลี่ยนระดับให้เองและอยู่ถาวร
+(ดู recalcTierExact ใน points.go)
+*/
 type employeeBody struct {
 	EmployeeCode string  `json:"employeeCode"`
 	Username     string  `json:"username"`
@@ -262,6 +272,22 @@ func AdminCreateEmployee(w http.ResponseWriter, r *http.Request) {
 
 	if body.EmployeeCode == "" || body.DisplayName == nil || *body.DisplayName == "" {
 		web.Error(w, http.StatusBadRequest, "กรอกรหัสพนักงานและชื่อ-นามสกุลให้ครบ")
+		return
+	}
+
+	/*
+		ตำแหน่ง แผนก และสาขา บังคับกรอก
+
+		ไม่ใช่แค่ข้อมูลประกอบ แต่ถูกใช้จริงสองทาง
+		  ตำแหน่งกับแผนก ตัดสินสิทธิ์เข้าหลังบ้านและสิทธิ์ปรับคะแนน
+		  แผนกกับสาขา    เป็นคอลัมน์ Section และ Location ในรายงานสรุป
+		ปล่อยว่างไว้แล้วพนักงานคนนั้นจะไปรวมอยู่ในแถว "-" ของรายงาน
+
+		ตรวจที่เซิร์ฟเวอร์ด้วย ไม่พึ่งหน้าเว็บอย่างเดียว
+		เพราะการเรียก API ตรงไม่ได้ผ่านฟอร์ม
+	*/
+	if blank(body.Position) || blank(body.Department) || blank(body.Branch) {
+		web.Error(w, http.StatusBadRequest, "กรอกตำแหน่ง แผนก และสาขาให้ครบ")
 		return
 	}
 
@@ -318,6 +344,13 @@ func AdminUpdateEmployee(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	/*
+		ไม่รับรหัสพนักงานจากเส้นทางแก้ไข
+
+		รหัสนี้ใช้เข้าสู่ระบบด้วย และระบบตั้งชื่อผู้ใช้จากรหัสนี้ตอนสร้างบัญชี
+		เปลี่ยนแล้วต้องตามไปแก้ชื่อผู้ใช้และแจ้งพนักงานทุกครั้ง
+		ตั้งได้ตอนเพิ่มพนักงานเท่านั้น
+	*/
 	user, err := store.QueryOne(`
 		UPDATE users SET
 		  display_name = COALESCE($2::varchar, display_name),
@@ -328,12 +361,15 @@ func AdminUpdateEmployee(w http.ResponseWriter, r *http.Request) {
 		  email        = CASE WHEN $7::varchar IS NULL THEN email
 		                      WHEN $7::varchar = '' THEN NULL ELSE $7::varchar END,
 		  birth_date   = COALESCE($8::date, birth_date),
-		  tier         = COALESCE($9::varchar, tier),
-		  status       = COALESCE($10::varchar, status)
+		  status       = COALESCE($9::varchar, status)
 		WHERE id = $1 RETURNING `+PublicUser,
 		id, body.DisplayName, body.Department, body.Position, body.Branch, body.Phone,
-		body.Email, nullDate(body.BirthDate), body.Tier, body.Status)
+		body.Email, nullDate(body.BirthDate), body.Status)
 	if err != nil {
+		if isUniqueViolation(err) {
+			web.Error(w, http.StatusConflict, "รหัสพนักงาน อีเมล หรือชื่อผู้ใช้นี้ถูกใช้แล้ว")
+			return
+		}
 		web.Fail(w, err)
 		return
 	}
@@ -444,15 +480,27 @@ func AdminPoints(w http.ResponseWriter, r *http.Request) {
 func AdminAdjustPoints(w http.ResponseWriter, r *http.Request) {
 	claims := middleware.CurrentUser(r)
 
+	// สิทธิ์ปรับคะแนนผูกกับตำแหน่งงาน ไม่ใช่แค่การเป็นผู้ดูแลระบบ
+	// role admin ผ่านเสมอ ส่วนคนอื่นต้องมีตำแหน่งตั้งแต่ Chief Engineer ขึ้นไป
+	if !CanAdjustPoints(claims) {
+		web.Error(w, http.StatusForbidden,
+			"บัญชีนี้ไม่มีสิทธิ์ปรับคะแนน — ต้องอยู่ในแผนกหลังบ้านและมีตำแหน่งที่กำหนดไว้")
+		return
+	}
+
 	var body struct {
-		UserID int64  `json:"userId"`
-		Points int    `json:"points"`
-		Title  string `json:"title"`
+		UserID    int64   `json:"userId"`
+		Points    int     `json:"points"`
+		Title     string  `json:"title"`
+		PointKind string  `json:"pointKind"`
+		ExpireAt  *string `json:"expireAt"` // ใช้กับคะแนนพิเศษเท่านั้น
 	}
 	if err := web.Decode(r, &body); err != nil || body.UserID == 0 || body.Points == 0 {
 		web.Error(w, http.StatusBadRequest, "ระบุพนักงานและจำนวนคะแนน")
 		return
 	}
+
+	special := body.PointKind == "special"
 
 	title := body.Title
 	if title == "" {
@@ -467,38 +515,77 @@ func AdminAdjustPoints(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 
 	// การปรับด้วยมือใช้จำนวนตามที่ผู้ดูแลกรอก ไม่คูณตัวคูณของระดับ
-	if _, err := tx.Exec(
-		`UPDATE users SET points = GREATEST(points + $2, 0) WHERE id = $1`, body.UserID, body.Points); err != nil {
+	if special {
+		// คะแนนพิเศษมีวันหมดอายุ จึงใช้ทางเดียวกับการจ่ายคะแนนจากกิจกรรม
+		// เพื่อให้กติกาการเลื่อนวันหมดอายุเหมือนกันทุกทาง
+		if body.Points > 0 {
+			if err := awardSpecialPoints(tx, body.UserID, body.Points, title,
+				nullDate(body.ExpireAt)); err != nil {
+				web.Fail(w, err)
+				return
+			}
+		} else {
+			// หักคืน ไม่แตะวันหมดอายุ
+			if _, err := tx.Exec(
+				`UPDATE users SET special_points = GREATEST(special_points + $2, 0) WHERE id = $1`,
+				body.UserID, body.Points); err != nil {
+				web.Fail(w, err)
+				return
+			}
+			if _, err := tx.Exec(`
+				INSERT INTO point_transactions (user_id, kind, source, title, points, point_kind)
+				VALUES ($1,'adjust','system',$2,$3,'special')`,
+				body.UserID, title, body.Points); err != nil {
+				web.Fail(w, err)
+				return
+			}
+		}
+	} else if _, err := tx.Exec(
+		`UPDATE users SET points = GREATEST(points + $2, 0) WHERE id = $1`,
+		body.UserID, body.Points); err != nil {
 		web.Fail(w, err)
 		return
 	}
-	if _, err := tx.Exec(`
-		INSERT INTO point_transactions (user_id, kind, source, title, points)
-		VALUES ($1,'adjust','system',$2,$3)`, body.UserID, title, body.Points); err != nil {
-		web.Fail(w, err)
-		return
+	if !special {
+		if _, err := tx.Exec(`
+			INSERT INTO point_transactions (user_id, kind, source, title, points, point_kind)
+			VALUES ($1,'adjust','system',$2,$3,'point')`,
+			body.UserID, title, body.Points); err != nil {
+			web.Fail(w, err)
+			return
+		}
 	}
-	// ปรับด้วยมือให้ระดับตามคะแนนใหม่ทันที ทั้งขึ้นและลง
-	changedTier, upgraded, err := recalcTierExact(tx, body.UserID)
-	if err != nil {
-		web.Fail(w, err)
-		return
-	}
-	if upgraded {
-		err = notifyTierUp(tx, body.UserID, changedTier)
-	} else {
-		err = notifyTierDown(tx, body.UserID, changedTier)
-	}
-	if err != nil {
-		web.Fail(w, err)
-		return
+
+	// ระดับสมาชิกคิดจากคะแนนปกติเท่านั้น ปรับคะแนนพิเศษจึงไม่กระทบระดับ
+	changedTier := ""
+	if !special {
+		var upgraded bool
+		var err error
+		changedTier, upgraded, err = recalcTierExact(tx, body.UserID)
+		if err != nil {
+			web.Fail(w, err)
+			return
+		}
+		if upgraded {
+			err = notifyTierUp(tx, body.UserID, changedTier)
+		} else {
+			err = notifyTierDown(tx, body.UserID, changedTier)
+		}
+		if err != nil {
+			web.Fail(w, err)
+			return
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		web.Fail(w, err)
 		return
 	}
 
-	detail := fmt.Sprintf("%d คะแนน", body.Points)
+	unit := "คะแนน"
+	if special {
+		unit = "คะแนนพิเศษ"
+	}
+	detail := fmt.Sprintf("%d %s", body.Points, unit)
 	if changedTier != "" {
 		detail += " · ระดับเปลี่ยนเป็น " + changedTier
 	}
@@ -539,6 +626,7 @@ type rewardBody struct {
 	MinTier      *string         `json:"minTier"`
 	StartsAt     *string         `json:"startsAt"`
 	EndsAt       *string         `json:"endsAt"`
+	PointKind    *string         `json:"pointKind"` // point = คะแนนปกติ, special = คะแนนพิเศษ
 }
 
 func AdminCreateReward(w http.ResponseWriter, r *http.Request) {
@@ -560,15 +648,17 @@ func AdminCreateReward(w http.ResponseWriter, r *http.Request) {
 
 	reward, err := store.QueryOne(`
 		INSERT INTO rewards (name, description, how_to, conditions, category, points, old_points,
-		                     stock, status, image_url, translations, min_tier, starts_at, ends_at)
+		                     stock, status, image_url, translations, min_tier, starts_at, ends_at,
+		                     point_kind)
 		VALUES ($1, COALESCE($2,''), COALESCE($3,''), COALESCE($4,''), COALESCE($5::varchar,'ทั่วไป'),
 		        $6::int, $7::int, COALESCE($8::int,0), COALESCE($9::varchar,'active'), $10::text,
 		        COALESCE($11::jsonb,'{}'::jsonb), COALESCE($12::varchar,'Member'),
-		        $13::date, $14::date)
+		        $13::date, $14::date, COALESCE($15::varchar,'point'))
 		RETURNING *`,
 		body.Name, body.Description, body.HowTo, body.Conditions, body.Category,
 		body.Points, body.OldPoints, body.Stock, body.Status, emptyToNull(body.ImageURL),
-		jsonOrNil(body.Translations), body.MinTier, nullDate(body.StartsAt), nullDate(body.EndsAt))
+		jsonOrNil(body.Translations), body.MinTier, nullDate(body.StartsAt), nullDate(body.EndsAt),
+		body.PointKind)
 	if err != nil {
 		web.Fail(w, err)
 		return
@@ -604,13 +694,15 @@ func AdminUpdateReward(w http.ResponseWriter, r *http.Request) {
 		  min_tier = COALESCE($13::varchar, min_tier),
 		  -- ส่งค่าว่างมาคือตั้งใจล้างช่วงเวลา จึงใช้ค่าที่ส่งมาตรง ๆ ไม่ COALESCE
 		  starts_at = CASE WHEN $14::boolean THEN $15::date ELSE starts_at END,
-		  ends_at   = CASE WHEN $16::boolean THEN $17::date ELSE ends_at END
+		  ends_at   = CASE WHEN $16::boolean THEN $17::date ELSE ends_at END,
+		  point_kind = COALESCE($18::varchar, point_kind)
 		WHERE id = $1 RETURNING *`,
 		id, body.Name, body.Description, body.HowTo, body.Conditions, body.Category,
 		body.Points, body.OldPoints, body.Stock, body.Status, body.ImageURL,
 		jsonOrNil(body.Translations), body.MinTier,
 		body.StartsAt != nil, nullDate(body.StartsAt),
-		body.EndsAt != nil, nullDate(body.EndsAt))
+		body.EndsAt != nil, nullDate(body.EndsAt),
+		body.PointKind)
 	if err != nil {
 		web.Fail(w, err)
 		return
@@ -704,21 +796,27 @@ type eventOption struct {
 }
 
 type eventBody struct {
-	Title        *string         `json:"title"`
-	Translations json.RawMessage `json:"translations"`
-	Description  *string         `json:"description"`
-	Agenda       *string         `json:"agenda"`
-	Location     *string         `json:"location"`
-	ImageURL     *string         `json:"imageUrl"`
-	EventDate    *string         `json:"eventDate"`
-	EndDate      *string         `json:"endDate"`
-	Options      []eventOption   `json:"options"`
-	StartTime    *string         `json:"startTime"`
-	EndTime      *string         `json:"endTime"`
-	Points       *int            `json:"points"`
-	Kind         *string         `json:"kind"`
-	Capacity     *int            `json:"capacity"`
-	Status       *string         `json:"status"`
+	Title                 *string         `json:"title"`
+	Translations          json.RawMessage `json:"translations"`
+	Description           *string         `json:"description"`
+	Agenda                *string         `json:"agenda"`
+	Location              *string         `json:"location"`
+	ImageURL              *string         `json:"imageUrl"`
+	EventDate             *string         `json:"eventDate"`
+	EndDate               *string         `json:"endDate"`
+	Options               []eventOption   `json:"options"`
+	StartTime             *string         `json:"startTime"`
+	EndTime               *string         `json:"endTime"`
+	Points                *int            `json:"points"`
+	SpecialPoints         *int            `json:"specialPoints"` // คะแนนพิเศษ จ่ายเพิ่มจากคะแนนปกติ
+	SpecialPointsExpireAt *string         `json:"specialPointsExpireAt"`
+	Kind                  *string         `json:"kind"`
+	Capacity              *int            `json:"capacity"`
+	Status                *string         `json:"status"`
+	// พื้นที่จัดงาน เว้นพิกัดว่างไว้ = ไม่ตรวจตำแหน่งตอนลงทะเบียน
+	VenueLat    *float64 `json:"venueLat"`
+	VenueLng    *float64 `json:"venueLng"`
+	VenueRadius *int     `json:"venueRadius"`
 }
 
 func AdminCreateEvent(w http.ResponseWriter, r *http.Request) {
@@ -740,15 +838,20 @@ func AdminCreateEvent(w http.ResponseWriter, r *http.Request) {
 
 	event, err := store.QueryOne(`
 		INSERT INTO events (title, description, agenda, location, image_url, event_date, end_date,
-		                    start_time, end_time, points, kind, capacity, status, translations)
+		                    start_time, end_time, points, kind, capacity, status, translations,
+		                    special_points, special_points_expire_at,
+		                    venue_lat, venue_lng, venue_radius)
 		VALUES ($1, COALESCE($2,''), COALESCE($3,''), COALESCE($4,''), $5, $6::date, $7::date,
 		        COALESCE($8::time,'09:00'), COALESCE($9::time,'12:00'), COALESCE($10::int,0),
 		        COALESCE($11::varchar,'register'), COALESCE($12::int,0), COALESCE($13::varchar,'open'),
-		        COALESCE($14::jsonb,'{}'::jsonb))
+		        COALESCE($14::jsonb,'{}'::jsonb), COALESCE($15::int,0), $16::date,
+		        $17::double precision, $18::double precision, COALESCE($19::int,150))
 		RETURNING *`,
 		body.Title, body.Description, body.Agenda, body.Location, emptyToNull(body.ImageURL),
 		body.EventDate, nullDate(body.EndDate), nullTime(body.StartTime), nullTime(body.EndTime),
-		body.Points, body.Kind, body.Capacity, body.Status, jsonOrNil(body.Translations))
+		body.Points, body.Kind, body.Capacity, body.Status, jsonOrNil(body.Translations),
+		body.SpecialPoints, nullDate(body.SpecialPointsExpireAt),
+		body.VenueLat, body.VenueLng, body.VenueRadius)
 	if err != nil {
 		web.Fail(w, err)
 		return
@@ -792,6 +895,13 @@ func AdminUpdateEvent(w http.ResponseWriter, r *http.Request) {
 		  end_time = COALESCE($8::time,end_time), points = COALESCE($9::int,points),
 		  kind = COALESCE($10::varchar,kind), capacity = COALESCE($11::int,capacity),
 		  status = COALESCE($12::varchar,status),
+		  special_points = COALESCE($18::int, special_points),
+		  special_points_expire_at = CASE
+		    WHEN $19::boolean THEN $20::date ELSE special_points_expire_at END,
+		  -- ส่งค่าว่างมาคือตั้งใจล้างพิกัด (เลิกตรวจตำแหน่ง) จึงใช้ค่าที่ส่งมาตรง ๆ
+		  venue_lat = CASE WHEN $21::boolean THEN $22::double precision ELSE venue_lat END,
+		  venue_lng = CASE WHEN $21::boolean THEN $23::double precision ELSE venue_lng END,
+		  venue_radius = COALESCE($24::int, venue_radius),
 		  translations = COALESCE($13::jsonb, translations),
 		  -- ส่งค่าว่างมาคือตั้งใจล้างวันสิ้นสุด จึงใช้ค่าที่ส่งมาตรง ๆ
 		  end_date = CASE WHEN $14::boolean THEN $15::date ELSE end_date END,
@@ -802,7 +912,11 @@ func AdminUpdateEvent(w http.ResponseWriter, r *http.Request) {
 		nullTime(body.StartTime), nullTime(body.EndTime), body.Points, body.Kind,
 		body.Capacity, body.Status, jsonOrNil(body.Translations),
 		body.EndDate != nil, nullDate(body.EndDate),
-		body.ImageURL != nil, emptyToNull(body.ImageURL))
+		body.ImageURL != nil, emptyToNull(body.ImageURL),
+		body.SpecialPoints,
+		body.SpecialPointsExpireAt != nil, nullDate(body.SpecialPointsExpireAt),
+		body.VenueLat != nil || body.VenueLng != nil, body.VenueLat, body.VenueLng,
+		body.VenueRadius)
 	if err != nil {
 		web.Fail(w, err)
 		return
@@ -865,8 +979,11 @@ func AdminCheckIn(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var title string
-	var points int
-	err = tx.QueryRow(`SELECT title, points FROM events WHERE id = $1`, eventID).Scan(&title, &points)
+	var points, specialPoints int
+	var specialExpire sql.NullTime
+	err = tx.QueryRow(
+		`SELECT title, points, special_points, special_points_expire_at FROM events WHERE id = $1`,
+		eventID).Scan(&title, &points, &specialPoints, &specialExpire)
 	if errors.Is(err, sql.ErrNoRows) {
 		web.Error(w, http.StatusNotFound, "ไม่พบกิจกรรมนี้")
 		return
@@ -902,7 +1019,19 @@ func AdminCheckIn(w http.ResponseWriter, r *http.Request) {
 		return
 
 	case current == "attended":
-		web.Error(w, http.StatusConflict, "พนักงานคนนี้เช็คอินไปแล้ว")
+		/*
+			คนนี้ลงทะเบียนผ่านแอปและได้คะแนนไปแล้ว
+
+			ตอบกลับเป็นสถานะ ไม่ใช่ error เพราะเป็นเรื่องที่เกิดได้ปกติหน้างาน
+			พนักงานอาจไม่แน่ใจว่าลงทะเบียนไปหรือยังเลยมาต่อแถวให้สแกนอีกรอบ
+			ผู้ดูแลควรเห็นข้อความอธิบายในหน้าต่างเดิม ไม่ใช่กล่อง error สีแดง
+
+			ที่สำคัญคือไม่จ่ายคะแนนซ้ำ ซึ่งเป็นเหตุผลหลักที่ต้องเช็กตรงนี้
+		*/
+		web.JSON(w, http.StatusOK, web.Map{
+			"ok": false, "status": "already-registered",
+			"name": displayName, "employeeCode": body.EmployeeCode, "event": title,
+		})
 		return
 
 	default:
@@ -941,6 +1070,12 @@ func AdminCheckIn(w http.ResponseWriter, r *http.Request) {
 			web.Fail(w, err)
 			return
 		}
+	}
+
+	// คะแนนพิเศษจ่ายแยกจากคะแนนปกติ และจ่ายแม้กิจกรรมจะไม่ได้ตั้งคะแนนปกติไว้
+	if err := awardSpecialPoints(tx, userID, specialPoints, "เข้าร่วม "+title, specialExpire); err != nil {
+		web.Fail(w, err)
+		return
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -1046,4 +1181,9 @@ func checkDateOrder(start, end *string) string {
 		return "วันสิ้นสุดต้องไม่มาก่อนวันเริ่ม"
 	}
 	return ""
+}
+
+// blank บอกว่าค่าที่ส่งมาว่างเปล่าหรือไม่ รวมถึงกรณีไม่ได้ส่งฟิลด์นั้นมาเลย
+func blank(value *string) bool {
+	return value == nil || strings.TrimSpace(*value) == ""
 }

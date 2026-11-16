@@ -208,6 +208,19 @@ func MaybeRunAnnualReset() (AnnualResetSummary, error) {
 func AdminAnnualReset(w http.ResponseWriter, r *http.Request) {
 	claims := middleware.CurrentUser(r)
 
+	/*
+		ใช้สิทธิ์ชุดเดียวกับการปรับคะแนน
+
+		การตัดยอดกระทบคะแนนและระดับของทุกคนในระบบพร้อมกันและย้อนกลับไม่ได้
+		จึงไม่ควรเปิดกว้างกว่าการปรับคะแนนของคนเดียว
+		ซ่อนปุ่มที่หน้าจอเป็นแค่ความสุภาพกับสายตา ของจริงกันตรงนี้
+	*/
+	if !CanAdjustPoints(claims) {
+		web.Error(w, http.StatusForbidden,
+			"บัญชีนี้ไม่มีสิทธิ์ตัดยอดคะแนนประจำปี")
+		return
+	}
+
 	// นับรอบปีที่ผ่านมาจากวันตัดยอดของปีก่อน เหมือนกับที่ตัวตั้งเวลาใช้
 	summary, err := RunAnnualReset(claims.ID, resetDate(time.Now().Year()-1))
 	if err != nil {
@@ -242,4 +255,38 @@ func AdminResetStatus(w http.ResponseWriter, r *http.Request) {
 		"lastResetYear": last,
 		"atRisk":        pending,
 	})
+}
+
+/*
+NextResetDate คืนวันตัดยอดคะแนนครั้งถัดไป
+
+ถ้าปีนี้ยังไม่ถึงวันตัดยอด ก็คือวันนั้นของปีนี้
+ถ้าเลยมาแล้ว ก็ข้ามไปวันเดียวกันของปีหน้า
+
+มีไว้เพื่อให้พนักงานเห็นวันหมดอายุเสมอ ไม่ใช่ขีดกลางว่าง ๆ
+คะแนนมีกำหนดหมดอายุอยู่แล้วตามรอบปี ต่อให้ยังไม่เคยถูกตัดสักครั้ง
+การแสดงขีดกลางทำให้เข้าใจผิดว่าคะแนนอยู่ได้ตลอดไป แล้วไปตกใจตอนถูกตัดจริง
+*/
+func NextResetDate() time.Time {
+	now := time.Now()
+
+	due := resetDate(now.Year())
+	if now.Before(due) {
+		return due
+	}
+	return resetDate(now.Year() + 1)
+}
+
+// withExpiry เติมวันหมดอายุให้ข้อมูลผู้ใช้เมื่อยังไม่ได้ตั้งไว้รายคน
+//
+// ค่าในคอลัมน์ points_expire_at มีไว้สำหรับกรณีพิเศษที่ต้องกำหนดเองรายคน
+// ถ้าไม่ได้ตั้ง ให้ใช้วันตัดยอดประจำปีของทั้งระบบ
+func withExpiry(user map[string]any) map[string]any {
+	if user == nil {
+		return user
+	}
+	if value, ok := user["points_expire_at"]; !ok || value == nil {
+		user["points_expire_at"] = NextResetDate().Format("2006-01-02")
+	}
+	return user
 }

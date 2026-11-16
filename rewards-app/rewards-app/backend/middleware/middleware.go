@@ -62,16 +62,37 @@ func RequireAuth(next http.HandlerFunc) http.HandlerFunc {
 
 // RequireAdmin บังคับให้ต้องเป็นผู้ดูแลระบบ
 func RequireAdmin(next http.HandlerFunc) http.HandlerFunc {
+	return requireRole(next, "เฉพาะผู้ดูแลระบบเท่านั้น", "admin")
+}
+
+// RequireReport เปิดให้ฝ่ายธุรการ (role ga) เข้าดูได้ด้วย
+//
+// ใช้กับรายงานสรุปที่ไม่มีชื่อหรือรหัสพนักงานอยู่ในผลลัพธ์เลย
+// ส่วนเส้นทางที่มีรายชื่อยังคงใช้ RequireAdmin ตามเดิม
+func RequireReport(next http.HandlerFunc) http.HandlerFunc {
+	return requireRole(next, "เฉพาะผู้ดูแลระบบและฝ่ายธุรการเท่านั้น", "admin", "ga")
+}
+
+func requireRole(next http.HandlerFunc, message string, roles ...string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		claims := parse(r)
 		if claims == nil {
 			web.Error(w, http.StatusUnauthorized, "กรุณาเข้าสู่ระบบก่อนใช้งาน")
 			return
 		}
-		if claims.Role != "admin" {
-			web.Error(w, http.StatusForbidden, "เฉพาะผู้ดูแลระบบเท่านั้น")
+
+		allowed := false
+		for _, role := range roles {
+			if claims.Role == role {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			web.Error(w, http.StatusForbidden, message)
 			return
 		}
+
 		next(w, r.WithContext(context.WithValue(r.Context(), userKey, claims)))
 	}
 }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
+import { useEmployeeArea } from '../lib/useEmployeeArea';
 import { useT } from '../lib/i18n';
 import { Icon } from './icons';
 import { tierCard, tierIcon } from '../lib/tier';
@@ -163,10 +164,13 @@ function LevelUpModal({ tier, onDismiss }) {
 export default function TierLevelUpWatcher() {
   const { user } = useAuth();
   const location = useLocation();
+  const inEmployeeArea = useEmployeeArea();
   const [levelUp, setLevelUp] = useState(null);
   const checkingRef = useRef(false);
 
   const check = useCallback(() => {
+    // ไม่เด้งในหน้าผู้ดูแลระบบ พนักงานแผนกหลังบ้านมี role เป็น user แต่เข้าหน้านั้นได้
+    if (!inEmployeeArea) return;
     if (!user || user.role === 'admin' || !user.terms_accepted_at || checkingRef.current) return;
     checkingRef.current = true;
 
@@ -199,7 +203,7 @@ export default function TierLevelUpWatcher() {
       .finally(() => {
         checkingRef.current = false;
       });
-  }, [user]);
+  }, [user, inEmployeeArea]);
 
   // เช็กตอนล็อกอิน/โหลดแอป และทุกครั้งที่กลับมาหน้าแรก หรือสลับมาที่แท็บนี้
   useEffect(() => {
@@ -215,6 +219,21 @@ export default function TierLevelUpWatcher() {
       document.removeEventListener('visibilitychange', onFocus);
     };
   }, [check]);
+
+  /*
+    เช็กซ้ำตอนวาด ไม่ใช่เช็กแค่ตอนจะดึงข้อมูล
+
+    การดึงข้อมูลเป็นงานที่รอผลลัพธ์ ถ้าเริ่มดึงตอนอยู่ฝั่งพนักงาน
+    แล้วผู้ใช้กดเข้าหน้าผู้ดูแลระบบก่อนผลจะกลับมา ป็อปอัปจะถูกตั้งค่า
+    แล้วโผล่ขึ้นมาบนหน้าผู้ดูแลระบบ
+
+    กรณีเดียวกันเกิดได้อีกทางคือป็อปอัปเปิดค้างอยู่แล้วผู้ใช้สลับฝั่ง
+    ตัวที่เปิดไว้จะยังค้างอยู่เพราะไม่มีใครสั่งให้หายไป
+
+    ซ่อนเฉย ๆ ไม่ล้างค่าทิ้ง พอกลับมาฝั่งพนักงานจะได้เห็นคำฉลองเหมือนเดิม
+    เพราะยังไม่ได้กดรับทราบ
+  */
+  if (!inEmployeeArea) return null;
 
   if (!levelUp || !user) return null;
 

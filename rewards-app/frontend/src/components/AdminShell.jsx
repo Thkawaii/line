@@ -8,12 +8,16 @@ const NAV = [
   { to: '/admin', label: 'ภาพรวม', icon: Icon.Grid, end: true },
   { to: '/admin/employees', label: 'จัดการพนักงาน', icon: Icon.Users },
   { to: '/admin/rewards', label: 'จัดการของรางวัล', icon: Icon.Gift },
-  { to: '/admin/events', label: 'จัดการกิจกรรม', icon: Icon.Calendar },
+  { to: '/admin/events', label: 'จัดการกิจกรรม', icon: Icon.Calendar, staff: true },
   { to: '/admin/points', label: 'จัดการคะแนน', icon: Icon.History },
+  { to: '/admin/settings/membership', label: 'จัดการสมาชิก', icon: Icon.Crown },
+  { to: '/admin/feedback', label: 'ผลประเมินกิจกรรม', icon: Icon.StarSparkle, staff: true },
   {
     label: 'ประกาศและเนื้อหา',
     icon: Icon.Megaphone,
+    staff: true,
     children: [
+      { to: '/admin/news', label: 'ประกาศข่าวสาร', staff: true },
       { to: '/admin/notifications', label: 'Notifications' },
       { to: '/admin/content/banner', label: 'Banner' },
       { to: '/admin/content/faq', label: 'FAQ' },
@@ -23,8 +27,10 @@ const NAV = [
   {
     label: 'ตั้งค่าระบบ',
     icon: Icon.Settings,
+    // adminOnly = เห็นเฉพาะ role admin ตัวจริง
+    // พนักงานแผนกหลังบ้านเข้าหลังบ้านได้ แต่ไม่เห็นกลุ่มนี้
+    adminOnly: true,
     children: [
-      { to: '/admin/settings/membership', label: 'Membership' },
       { to: '/admin/settings/accounts', label: 'Admin Accounts' },
       { to: '/admin/settings/audit', label: 'Audit Logs' },
       { to: '/admin/settings/system', label: 'System Settings' },
@@ -36,12 +42,38 @@ const NAV = [
 const MOBILE_TABS = [
   { to: '/admin', short: 'ภาพรวม', icon: Icon.Grid, end: true },
   { to: '/admin/employees', short: 'พนักงาน', icon: Icon.Users },
-  { to: '/admin/events', short: 'กิจกรรม', icon: Icon.Calendar },
-  { to: '/admin/rewards', short: 'ของรางวัล', icon: Icon.Gift },
+  { to: '/admin/events', short: 'กิจกรรม', icon: Icon.Calendar, staff: true },
 ];
 
 export default function AdminShell({ title, breadcrumb, actions, children }) {
   const { user, logout } = useAuth();
+
+  /*
+   * ฝ่ายธุรการ (role ga) เห็นเฉพาะเมนูที่ติดธง staff ไว้
+   *
+   * ซ่อนเมนูเป็นแค่ความสุภาพกับสายตาเท่านั้น ของจริงกันที่เซิร์ฟเวอร์
+   * ซึ่งไม่ส่งข้อมูลที่มีรายชื่อพนักงานให้ role นี้ตั้งแต่แรกอยู่แล้ว
+   */
+  /*
+    กรองเมนูสองชั้น
+
+    adminOnly  เห็นเฉพาะผู้ดูแลระบบตัวจริง — กลุ่ม "ตั้งค่าระบบ"
+    staff      บัญชีฝ่ายธุรการ (role ga) เห็นเฉพาะที่ติดธงนี้
+
+    ซ่อนเมนูเป็นแค่ความสุภาพกับสายตา ของจริงกันที่เซิร์ฟเวอร์
+    ด้วย RequireAdmin กับ RequireOffice
+  */
+  const systemAdmin = user?.role === 'admin';
+  const staffOnly = user?.role === 'ga';
+  const allowed = (item) => (!item.adminOnly || systemAdmin) && (!staffOnly || item.staff);
+
+  // กลุ่มเมนูต้องกรองรายการย่อยด้วย ไม่งั้นฝ่ายธุรการจะเห็นหัวข้อกลุ่ม
+  // แล้วกางออกมาเจอลิงก์ที่กดแล้วเด้งกลับ ซึ่งสับสนกว่าไม่เห็นเลย
+  const nav = NAV.filter(allowed)
+    .map((item) => (item.children ? { ...item, children: item.children.filter(allowed) } : item))
+    .filter((item) => !item.children || item.children.length > 0);
+
+  const mobileTabs = MOBILE_TABS.filter(allowed);
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
   const [openGroup, setOpenGroup] = useState('ประกาศและเนื้อหา');
@@ -82,7 +114,7 @@ export default function AdminShell({ title, breadcrumb, actions, children }) {
         </button>
 
         <nav className="space-y-1 p-3">
-          {NAV.map((item) =>
+          {nav.map((item) =>
             item.children ? (
               <div key={item.label}>
                 <button
@@ -158,7 +190,7 @@ export default function AdminShell({ title, breadcrumb, actions, children }) {
             วางแค่สี่อันที่ใช้บ่อย ที่เหลืออยู่ในปุ่มเมนู เพราะแถบที่เลื่อนได้ทำให้คนหาของไม่เจอ */}
         <nav className="sticky bottom-0 z-20 border-t border-line bg-white lg:hidden">
           <ul className="flex">
-            {MOBILE_TABS.map((item) => (
+            {mobileTabs.map((item) => (
               <li key={item.to} className="flex-1">
                 <NavLink
                   to={item.to}
@@ -208,7 +240,7 @@ export default function AdminShell({ title, breadcrumb, actions, children }) {
             </div>
 
             <ul className="p-3">
-              {NAV.map((item) =>
+              {nav.map((item) =>
                 item.children ? (
                   <li key={item.label} className="mt-2">
                     <p className="flex items-center gap-2 px-3 py-2 text-2xs font-semibold text-muted">

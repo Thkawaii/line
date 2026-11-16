@@ -33,6 +33,34 @@ services:
     ports:
       - '127.0.0.1:4007:4007'
 
+  # บริการแปลภาษาในวงแลน — ไม่บังคับ
+  #
+  # เปิดด้วย:  docker compose -f docker-compose.prod.yml --profile translate up -d
+  # แล้วตั้ง TRANSLATE_URL=http://translate:5000 ในไฟล์ rewards.env
+  #
+  # ทำไมถึงคุ้มที่จะเปิด: เครื่องในวงแลนโรงงานมักออกเน็ตไม่ได้ ถ้าไม่มีตัวนี้
+  # ระบบจะตกไปใช้คลังคำในตัวโปรแกรมซึ่งแปลได้เฉพาะข้อความสั้น ๆ
+  # ประโยคยาวจะยังเป็นภาษาไทย (ตั้งใจให้เป็นแบบนั้น ดีกว่าแสดงข้อความที่แปลครึ่ง ๆ กลาง ๆ)
+  #
+  # อิมเมจค่อนข้างใหญ่ (ราว 2 GB) และรอบแรกใช้เวลาดาวน์โหลดโมเดลสักพัก
+  # ข้อดีคือข้อความของบริษัทไม่ถูกส่งออกไปนอกองค์กรเลย
+  translate:
+    image: libretranslate/libretranslate:latest
+    profiles: ['translate']
+    restart: unless-stopped
+    environment:
+      # โหลดเฉพาะคู่ภาษาที่ใช้จริง จะได้ไม่กินพื้นที่และ RAM เกินจำเป็น
+      LT_LOAD_ONLY: 'th,en,ja'
+      LT_DISABLE_WEB_UI: 'true'
+    volumes:
+      - lt-models:/home/libretranslate/.local
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:5000/languages || exit 1']
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 300s
+
   frontend:
     build:
       context: ./frontend
@@ -52,3 +80,4 @@ services:
 volumes:
   pgdata:
   uploads:
+  lt-models:

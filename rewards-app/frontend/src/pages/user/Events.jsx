@@ -5,7 +5,140 @@ import { EventCard } from '../../components/cards';
 import { ChipBar, EmptyState, ImagePlaceholder, Modal, SearchInput, Spinner, useToast } from '../../components/ui';
 import { Icon } from '../../components/icons';
 import { dateRange, num, timeRange } from '../../lib/format';
-import { useT } from '../../lib/i18n';
+import { useLanguage } from '../../lib/i18n';
+import { formatDistance, getPosition } from '../../lib/geolocation';
+import { SpecialPointIcon } from '../../components/SpecialPoints';
+
+/**
+ * หน้าต่างแจ้งปัญหาเรื่องตำแหน่ง
+ *
+ * ใช้หน้าต่างกลางจอแทนแถบแจ้งเตือนมุมจอ เพราะแถบแจ้งเตือนหายไปเองในไม่กี่วินาที
+ * ผู้ใช้ที่กดลงทะเบียนแล้วมองไปทางอื่นจะไม่เห็นเลยว่าทำไมไม่สำเร็จ
+ *
+ * แต่ละสาเหตุมีหัวข้อ คำอธิบาย และสีของตัวเอง เพราะทางแก้ต่างกันสิ้นเชิง
+ * สาเหตุที่ผู้ใช้แก้เองได้จะมีปุ่มลองอีกครั้งให้ ส่วนที่ต้องให้ผู้ดูแลแก้จะไม่มี
+ */
+function LocationIssueDialog({ issue, onClose, onRetry, t }) {
+  if (!issue) return null;
+
+  const outside = issue.code === 'outside';
+  const canRetry = issue.code !== 'insecure';
+
+  const text = {
+    outside: {
+      title: t('events.outsideVenueTitle'),
+      detail: t('events.outsideVenueDetail', { distance: formatDistance(issue.distance) }),
+      hint: t('events.outsideVenueHint'),
+    },
+    denied: {
+      title: t('events.locationDeniedTitle'),
+      detail: t('events.locationDenied'),
+      hint: t('events.locationDeniedHint'),
+    },
+    insecure: {
+      title: t('events.locationInsecureTitle'),
+      detail: t('events.locationInsecure'),
+      hint: '',
+    },
+  }[issue.code] || {
+    title: t('events.locationUnavailableTitle'),
+    detail: t('events.locationUnavailable'),
+    hint: t('events.locationUnavailableHint'),
+  };
+
+  return (
+    <Modal open onClose={onClose} size="sm">
+      <div className="p-6 text-center">
+        {/* วงกลมไอคอนใหญ่ตรงกลาง อ่านออกตั้งแต่ยังไม่ทันอ่านตัวหนังสือ
+            ว่าเป็นเรื่องตำแหน่ง ไม่ใช่เรื่องคะแนนหรือสิทธิ์ */}
+        <span
+          className={`mx-auto grid h-16 w-16 place-items-center rounded-full ${
+            outside ? 'bg-gold-wash text-gold-ink' : 'bg-danger/10 text-danger'
+          }`}
+        >
+          <Icon.Pin size={30} />
+        </span>
+
+        <h2 className="mt-4 text-lg font-bold text-ink">{text.title}</h2>
+        <p className="mt-2 text-sm leading-relaxed text-slate">{text.detail}</p>
+
+        {text.hint && (
+          <p className="mt-3 rounded-[10px] bg-page px-3 py-2.5 text-2xs text-muted">
+            {text.hint}
+          </p>
+        )}
+
+        <div className="mt-6 flex gap-2">
+          <button onClick={onClose} className="btn-ghost flex-1">
+            {t('common.close')}
+          </button>
+          {canRetry && (
+            <button onClick={onRetry} className="btn-primary flex-1">
+              {t('events.tryAgain')}
+            </button>
+          )}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * หน้าต่างยืนยันว่าลงทะเบียนหรือโหวตสำเร็จ
+ *
+ * ปิดตัวเองหลัง 3 วินาที แต่กดปิดเองก่อนได้
+ * ใช้หน้าต่างกลางจอแทนแถบแจ้งเตือนมุมจอ เพราะคะแนนที่ได้รับเป็นผลลัพธ์หลัก
+ * ของการกดปุ่ม ควรเห็นชัดว่าได้เท่าไหร่ ไม่ใช่แวบผ่านไปที่มุมจอ
+ */
+function SuccessDialog({ result, onClose, t }) {
+  /*
+    ตั้งเวลาปิดใหม่ทุกครั้งที่หน้าต่างเปิด และเคลียร์ทิ้งเมื่อปิด
+    ถ้าไม่เคลียร์ ผู้ใช้ที่กดปิดเองแล้วลงทะเบียนกิจกรรมถัดไปทันที
+    จะโดนตัวจับเวลาของรอบก่อนปิดหน้าต่างใหม่ทิ้งกลางคัน
+  */
+  useEffect(() => {
+    if (!result) return;
+    const timer = setTimeout(onClose, 3000);
+    return () => clearTimeout(timer);
+  }, [result, onClose]);
+
+  if (!result) return null;
+
+  const voted = result.kind === 'vote';
+
+  return (
+    <Modal open onClose={onClose} size="sm">
+      <div className="p-7 text-center">
+        <span className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-success-wash text-success">
+          <Icon.CheckCircle size={34} />
+        </span>
+
+        <h2 className="mt-4 text-lg font-bold text-ink">
+          {t(voted ? 'events.voteSuccess' : 'events.registerSuccess')}
+        </h2>
+
+        {/* คะแนนเป็นพระเอกของหน้าต่างนี้ จึงตัวใหญ่กว่าหัวข้อ */}
+        {result.points > 0 && (
+          <p className="mt-3 text-2xl font-bold text-primary">
+            +{num(result.points)}{' '}
+            <span className="text-base font-normal text-muted">{t('common.points')}</span>
+          </p>
+        )}
+
+        {result.specialPoints > 0 && (
+          <p className="mt-1.5 flex items-center justify-center gap-1.5 text-xl font-bold text-primary">
+            <SpecialPointIcon size={24} />+{num(result.specialPoints)}
+            <span className="text-base font-normal text-muted">{t('points.special')}</span>
+          </p>
+        )}
+
+        <button onClick={onClose} className="btn-ghost mt-6 w-full">
+          {t('common.close')}
+        </button>
+      </div>
+    </Modal>
+  );
+}
 
 const FILTERS = [
   { value: 'all', key: 'common.all' },
@@ -16,8 +149,16 @@ const FILTERS = [
 
 export default function Events() {
   const toast = useToast();
-  const t = useT();
+  const { t, lang } = useLanguage();
   const [filter, setFilter] = useState('all');
+  const [registering, setRegistering] = useState(false);
+  const [locating, setLocating] = useState(false);
+
+  // ปัญหาเรื่องตำแหน่ง เก็บกิจกรรมกับตัวเลือกไว้ด้วย ผู้ใช้จะได้กดลองใหม่จากหน้าต่างเดิม
+  const [locationIssue, setLocationIssue] = useState(null);
+
+  // ผลลัพธ์ของการลงทะเบียน/โหวต แสดงเป็นหน้าต่างกลางจอที่ปิดเองใน 3 วินาที
+  const [success, setSuccess] = useState(null);
   const [q, setQ] = useState('');
   const [events, setEvents] = useState(null);
   const [active, setActive] = useState(null);
@@ -25,27 +166,77 @@ export default function Events() {
 
   const load = useCallback(() => {
     api.events({ filter, q }).then(({ events }) => setEvents(events));
-  }, [filter, q]);
+  }, [filter, q, lang]);
 
   useEffect(() => {
     const timer = setTimeout(load, q ? 250 : 0);
     return () => clearTimeout(timer);
   }, [load, q]);
 
+  /*
+    ลงทะเบียน
+
+    กิจกรรมที่ผู้ดูแลตั้งพื้นที่จัดงานไว้ (needs_location) ต้องขอตำแหน่งจากเบราว์เซอร์ก่อน
+    แล้วส่งไปให้เซิร์ฟเวอร์ตรวจว่าอยู่ในรัศมีงานไหม ผ่านแล้วได้คะแนนทันที
+
+    ปัญหาเรื่องตำแหน่งแสดงเป็นหน้าต่างกลางจอ ไม่ใช่แถบแจ้งเตือนมุมจอ
+    เพราะแถบแจ้งเตือนหายไปเองในไม่กี่วินาที ผู้ใช้ที่กดแล้วมองไปทางอื่น
+    จะไม่เห็นเลยว่าทำไมลงทะเบียนไม่สำเร็จ แล้วกดซ้ำไปเรื่อย ๆ
+
+    แยกสาเหตุเป็นสี่แบบ เพราะทางแก้ของผู้ใช้ต่างกันสิ้นเชิง
+      อยู่นอกพื้นที่          ต้องเดินเข้าไปใกล้จุดจัดงาน
+      ไม่อนุญาตให้ใช้ตำแหน่ง  ต้องไปเปิดสิทธิ์ในตั้งค่าของเบราว์เซอร์
+      หาตำแหน่งไม่ได้         ต้องเปิด GPS หรือเดินออกไปที่โล่ง
+      เว็บไม่ได้เปิดผ่าน https ต้องให้ผู้ดูแลระบบแก้ที่เครื่องเซิร์ฟเวอร์
+  */
   async function register(event, optionId) {
+    setRegistering(true);
     try {
-      const res = await api.registerEvent(event.id, optionId);
-      toast(
-        res.kind === 'vote'
-          ? t('events.voteSuccess', { points: num(res.points) })
-          : t('events.registerSuccess'),
-        'primary'
-      );
+      let position = null;
+
+      if (event.needs_location) {
+        setLocating(true);
+        try {
+          const spot = await getPosition();
+          position = { lat: spot.lat, lng: spot.lng };
+        } catch (err) {
+          setLocationIssue({ code: err.code, event, optionId });
+          return;
+        } finally {
+          setLocating(false);
+        }
+      }
+
+      const res = await api.registerEvent(event.id, optionId, position);
+
+      // เลือกข้อความจากชนิดของกิจกรรม ไม่ใช่จากจำนวนคะแนน
+      // เดิมดูจากคะแนน พอกิจกรรมลงทะเบียนเริ่มจ่ายคะแนนทันที
+      // ข้อความเลยกลายเป็น "โหวตเรียบร้อย" ทั้งที่ผู้ใช้กดลงทะเบียน
+      setSuccess({
+        kind: res.kind,
+        points: res.points || 0,
+        specialPoints: res.specialPoints || 0,
+      });
+
       setActive(null);
       setChoice(null);
       load();
     } catch (err) {
-      toast(err.message);
+      // เซิร์ฟเวอร์ส่งระยะห่างกลับมาด้วย บอกผู้ใช้ไปเลยว่าห่างแค่ไหน
+      // เขาจะได้รู้ว่าควรเดินเข้าไปอีกหน่อย หรือมาผิดที่ไปเลย
+      if (err.data?.code === 'outside_venue') {
+        setLocationIssue({
+          code: 'outside',
+          distance: err.data.distance,
+          event,
+          optionId,
+        });
+      } else {
+        toast(err.message);
+      }
+    } finally {
+      setRegistering(false);
+      setLocating(false);
     }
   }
 
@@ -228,6 +419,19 @@ export default function Events() {
           </>
         )}
       </Modal>
+
+      <SuccessDialog result={success} t={t} onClose={() => setSuccess(null)} />
+
+      <LocationIssueDialog
+        issue={locationIssue}
+        t={t}
+        onClose={() => setLocationIssue(null)}
+        onRetry={() => {
+          const retry = locationIssue;
+          setLocationIssue(null);
+          register(retry.event, retry.optionId);
+        }}
+      />
     </MobileShell>
   );
 }

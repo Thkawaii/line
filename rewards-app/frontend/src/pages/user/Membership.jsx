@@ -6,16 +6,16 @@ import TierProgress from '../../components/TierProgress';
 import { Icon } from '../../components/icons';
 import { num } from '../../lib/format';
 import { tierCard, tierCircle, tierIcon } from '../../lib/tier';
-import { useT } from '../../lib/i18n';
+import { useLanguage } from '../../lib/i18n';
 
 
 export default function Membership() {
-  const t = useT();
+  const { t, lang } = useLanguage();
   const [data, setData] = useState(null);
 
   useEffect(() => {
     api.tiers().then(setData);
-  }, []);
+  }, [lang]);
 
   if (!data) {
     return (

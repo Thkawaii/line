@@ -70,7 +70,7 @@ func AdminOverview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	eventStats, err := store.Query(`
-		SELECT e.id, e.title, e.event_date, e.capacity,
+		SELECT e.id, e.title, e.event_date, e.end_date, e.capacity,
 		       (SELECT count(*)::int FROM event_registrations r WHERE r.event_id = e.id) AS joined
 		FROM events e WHERE e.status = 'open' ORDER BY e.event_date LIMIT 5`)
 	if err != nil {
@@ -98,82 +98,6 @@ func AdminOverview(w http.ResponseWriter, r *http.Request) {
 		"todo":         web.Map{"pending": pending, "lowStock": lowStock, "outStock": outStock},
 		"events":       eventStats,
 		"pickups":      pickups,
-	})
-}
-
-func AdminAnalytics(w http.ResponseWriter, r *http.Request) {
-	registrations, err := store.Count(`SELECT count(*)::int FROM event_registrations`)
-	if err != nil {
-		web.Fail(w, err)
-		return
-	}
-	attended, err := store.Count(
-		`SELECT count(*)::int FROM event_registrations WHERE status = 'attended'`)
-	if err != nil {
-		web.Fail(w, err)
-		return
-	}
-	pointsOut, err := store.Count(
-		`SELECT COALESCE(sum(points),0)::int FROM point_transactions WHERE points > 0`)
-	if err != nil {
-		web.Fail(w, err)
-		return
-	}
-	pointsIn, err := store.Count(
-		`SELECT COALESCE(sum(-points),0)::int FROM point_transactions WHERE points < 0`)
-	if err != nil {
-		web.Fail(w, err)
-		return
-	}
-
-	topEvents, err := store.Query(`
-		SELECT e.title, count(r.id)::int AS joined, e.capacity
-		FROM events e LEFT JOIN event_registrations r ON r.event_id = e.id
-		GROUP BY e.id ORDER BY joined DESC LIMIT 5`)
-	if err != nil {
-		web.Fail(w, err)
-		return
-	}
-
-	topRewards, err := store.Query(`
-		SELECT r.name, count(d.id)::int AS redeemed, COALESCE(sum(d.points_used),0)::int AS points
-		FROM rewards r LEFT JOIN redemptions d ON d.reward_id = r.id
-		GROUP BY r.id ORDER BY redeemed DESC LIMIT 5`)
-	if err != nil {
-		web.Fail(w, err)
-		return
-	}
-
-	rewardSplit, err := store.Query(`
-		SELECT r.category, count(d.id)::int AS n
-		FROM redemptions d JOIN rewards r ON r.id = d.reward_id
-		GROUP BY r.category ORDER BY n DESC`)
-	if err != nil {
-		web.Fail(w, err)
-		return
-	}
-
-	monthly, err := store.Query(`
-		SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month,
-		       COALESCE(sum(points) FILTER (WHERE points > 0),0)::int AS earned,
-		       COALESCE(sum(-points) FILTER (WHERE points < 0),0)::int AS spent
-		FROM point_transactions
-		WHERE created_at > now() - interval '6 months'
-		GROUP BY 1 ORDER BY 1`)
-	if err != nil {
-		web.Fail(w, err)
-		return
-	}
-
-	web.JSON(w, http.StatusOK, web.Map{
-		"registrations": registrations,
-		"attended":      attended,
-		"pointsOut":     pointsOut,
-		"pointsIn":      pointsIn,
-		"topEvents":     topEvents,
-		"topRewards":    topRewards,
-		"rewardSplit":   rewardSplit,
-		"monthly":       monthly,
 	})
 }
 
@@ -336,9 +260,8 @@ func AdminCreateEmployee(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if body.EmployeeCode == "" || body.DisplayName == nil || *body.DisplayName == "" ||
-		body.Email == nil || *body.Email == "" {
-		web.Error(w, http.StatusBadRequest, "กรอกรหัสพนักงาน ชื่อ-นามสกุล และอีเมลให้ครบ")
+	if body.EmployeeCode == "" || body.DisplayName == nil || *body.DisplayName == "" {
+		web.Error(w, http.StatusBadRequest, "กรอกรหัสพนักงานและชื่อ-นามสกุลให้ครบ")
 		return
 	}
 
@@ -365,7 +288,7 @@ func AdminCreateEmployee(w http.ResponseWriter, r *http.Request) {
 		VALUES ($1,$2,$3,$4,$5,COALESCE($6,''),COALESCE($7,''),COALESCE($8,''),COALESCE($9,''),
 		        $10::date, COALESCE($11::varchar,'Member'), COALESCE($12::varchar,'Active'))
 		RETURNING `+PublicUser,
-		body.EmployeeCode, username, body.Email, hash, body.DisplayName, body.Department,
+		body.EmployeeCode, username, emptyToNull(body.Email), hash, body.DisplayName, body.Department,
 		body.Position, body.Branch, body.Phone, nullDate(body.BirthDate), body.Tier, body.Status)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -402,7 +325,8 @@ func AdminUpdateEmployee(w http.ResponseWriter, r *http.Request) {
 		  position     = COALESCE($4::varchar, position),
 		  branch       = COALESCE($5::varchar, branch),
 		  phone        = COALESCE($6::varchar, phone),
-		  email        = COALESCE($7::varchar, email),
+		  email        = CASE WHEN $7::varchar IS NULL THEN email
+		                      WHEN $7::varchar = '' THEN NULL ELSE $7::varchar END,
 		  birth_date   = COALESCE($8::date, birth_date),
 		  tier         = COALESCE($9::varchar, tier),
 		  status       = COALESCE($10::varchar, status)
@@ -418,10 +342,55 @@ func AdminUpdateEmployee(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// ตั้งรหัสผ่านใหม่เฉพาะตอนที่ผู้ดูแลกรอกมา ส่งว่างมาคือไม่เปลี่ยน
+	if body.Password != "" {
+		hash, err := security.HashPassword(body.Password)
+		if err != nil {
+			web.Fail(w, err)
+			return
+		}
+		if _, err := store.Exec(`UPDATE users SET password_hash = $2 WHERE id = $1`, id, hash); err != nil {
+			web.Fail(w, err)
+			return
+		}
+	}
+
 	code, _ := user["employee_code"].(string)
 	name, _ := user["display_name"].(string)
-	logAudit(claims.ID, "employee.update", code, name)
+
+	action := "employee.update"
+	if body.Password != "" {
+		action = "employee.update+password"
+	}
+	logAudit(claims.ID, action, code, name)
 	web.JSON(w, http.StatusOK, web.Map{"user": user})
+}
+
+func AdminDeleteEmployee(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.CurrentUser(r)
+
+	id, ok := web.PathID(r, "id")
+	if !ok {
+		web.Error(w, http.StatusBadRequest, "รหัสพนักงานไม่ถูกต้อง")
+		return
+	}
+
+	// จำกัดเฉพาะ role = 'user' กันไม่ให้ลบบัญชีผู้ดูแลระบบผ่านทางนี้ไปโดยไม่ตั้งใจ
+	row, err := store.QueryOne(
+		`DELETE FROM users WHERE id = $1 AND role = 'user' RETURNING employee_code, display_name`, id)
+	if err != nil {
+		web.Fail(w, err)
+		return
+	}
+	if row == nil {
+		web.Error(w, http.StatusNotFound, "ไม่พบพนักงานคนนี้")
+		return
+	}
+
+	code, _ := row["employee_code"].(string)
+	name, _ := row["display_name"].(string)
+	logAudit(claims.ID, "employee.delete", code, name)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 /* ---------- คะแนน ---------- */
@@ -720,7 +689,18 @@ func AdminEvents(w http.ResponseWriter, r *http.Request) {
 		web.Fail(w, err)
 		return
 	}
+	if err := attachOptions(rows, "th"); err != nil {
+		web.Fail(w, err)
+		return
+	}
 	web.JSON(w, http.StatusOK, web.Map{"events": rows})
+}
+
+// ตัวเลือกของกิจกรรมโหวต ID เป็น 0 แปลว่าเป็นตัวเลือกใหม่
+type eventOption struct {
+	ID     int64  `json:"id"`
+	Label  string `json:"label"`
+	Detail string `json:"detail"`
 }
 
 type eventBody struct {
@@ -729,8 +709,10 @@ type eventBody struct {
 	Description  *string         `json:"description"`
 	Agenda       *string         `json:"agenda"`
 	Location     *string         `json:"location"`
+	ImageURL     *string         `json:"imageUrl"`
 	EventDate    *string         `json:"eventDate"`
 	EndDate      *string         `json:"endDate"`
+	Options      []eventOption   `json:"options"`
 	StartTime    *string         `json:"startTime"`
 	EndTime      *string         `json:"endTime"`
 	Points       *int            `json:"points"`
@@ -757,19 +739,26 @@ func AdminCreateEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	event, err := store.QueryOne(`
-		INSERT INTO events (title, description, agenda, location, event_date, end_date,
+		INSERT INTO events (title, description, agenda, location, image_url, event_date, end_date,
 		                    start_time, end_time, points, kind, capacity, status, translations)
-		VALUES ($1, COALESCE($2,''), COALESCE($3,''), COALESCE($4,''), $5::date, $6::date,
-		        COALESCE($7::time,'09:00'), COALESCE($8::time,'12:00'), COALESCE($9::int,0),
-		        COALESCE($10::varchar,'register'), COALESCE($11::int,0), COALESCE($12::varchar,'open'),
-		        COALESCE($13::jsonb,'{}'::jsonb))
+		VALUES ($1, COALESCE($2,''), COALESCE($3,''), COALESCE($4,''), $5, $6::date, $7::date,
+		        COALESCE($8::time,'09:00'), COALESCE($9::time,'12:00'), COALESCE($10::int,0),
+		        COALESCE($11::varchar,'register'), COALESCE($12::int,0), COALESCE($13::varchar,'open'),
+		        COALESCE($14::jsonb,'{}'::jsonb))
 		RETURNING *`,
-		body.Title, body.Description, body.Agenda, body.Location, body.EventDate,
-		nullDate(body.EndDate), nullTime(body.StartTime), nullTime(body.EndTime), body.Points,
-		body.Kind, body.Capacity, body.Status, jsonOrNil(body.Translations))
+		body.Title, body.Description, body.Agenda, body.Location, emptyToNull(body.ImageURL),
+		body.EventDate, nullDate(body.EndDate), nullTime(body.StartTime), nullTime(body.EndTime),
+		body.Points, body.Kind, body.Capacity, body.Status, jsonOrNil(body.Translations))
 	if err != nil {
 		web.Fail(w, err)
 		return
+	}
+
+	if id, ok := event["id"].(int64); ok {
+		if err := saveOptions(id, body.Options); err != nil {
+			web.Fail(w, err)
+			return
+		}
 	}
 
 	logAudit(claims.ID, "event.create", *body.Title, "")
@@ -805,18 +794,26 @@ func AdminUpdateEvent(w http.ResponseWriter, r *http.Request) {
 		  status = COALESCE($12::varchar,status),
 		  translations = COALESCE($13::jsonb, translations),
 		  -- ส่งค่าว่างมาคือตั้งใจล้างวันสิ้นสุด จึงใช้ค่าที่ส่งมาตรง ๆ
-		  end_date = CASE WHEN $14::boolean THEN $15::date ELSE end_date END
+		  end_date = CASE WHEN $14::boolean THEN $15::date ELSE end_date END,
+		  -- รูปก็เหมือนกัน ส่งค่าว่างมาคือตั้งใจลบรูปทิ้ง
+		  image_url = CASE WHEN $16::boolean THEN $17::text ELSE image_url END
 		WHERE id = $1 RETURNING *`,
 		id, body.Title, body.Description, body.Agenda, body.Location, nullDate(body.EventDate),
 		nullTime(body.StartTime), nullTime(body.EndTime), body.Points, body.Kind,
 		body.Capacity, body.Status, jsonOrNil(body.Translations),
-		body.EndDate != nil, nullDate(body.EndDate))
+		body.EndDate != nil, nullDate(body.EndDate),
+		body.ImageURL != nil, emptyToNull(body.ImageURL))
 	if err != nil {
 		web.Fail(w, err)
 		return
 	}
 	if event == nil {
 		web.Error(w, http.StatusNotFound, "ไม่พบกิจกรรมนี้")
+		return
+	}
+
+	if err := saveOptions(id, body.Options); err != nil {
+		web.Fail(w, err)
 		return
 	}
 
@@ -837,6 +834,10 @@ func AdminCheckIn(w http.ResponseWriter, r *http.Request) {
 
 	var body struct {
 		EmployeeCode string `json:"employeeCode"`
+		// คนที่ไม่ได้ลงทะเบียนล่วงหน้าแต่มาหน้างาน ผู้ดูแลยืนยันแล้วเช็คอินให้ได้
+		// ต้องส่งมาเป็นจังหวะที่สองเสมอ จังหวะแรกระบบจะคืนชื่อมาให้ตรวจก่อน
+		// กันกรณีพิมพ์รหัสผิดแล้วเผลอให้คะแนนคนอื่น
+		AllowWalkIn bool `json:"allowWalkIn"`
 	}
 	if err := web.Decode(r, &body); err != nil || body.EmployeeCode == "" {
 		web.Error(w, http.StatusBadRequest, "ระบุรหัสพนักงาน")
@@ -875,17 +876,45 @@ func AdminCheckIn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := tx.Exec(`
-		UPDATE event_registrations SET status = 'attended', checked_in_at = now()
-		WHERE event_id = $1 AND user_id = $2 AND status = 'registered'`, eventID, userID)
-	if err != nil {
+	var current string
+	err = tx.QueryRow(`SELECT status FROM event_registrations WHERE event_id = $1 AND user_id = $2`,
+		eventID, userID).Scan(&current)
+
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		// ยังไม่ได้ลงทะเบียน จังหวะแรกคืนชื่อให้ผู้ดูแลตรวจก่อน ยังไม่บันทึกอะไร
+		if !body.AllowWalkIn {
+			web.JSON(w, http.StatusOK, web.Map{
+				"ok": false, "status": "not-registered",
+				"name": displayName, "employeeCode": body.EmployeeCode, "event": title,
+			})
+			return
+		}
+		if _, err := tx.Exec(`
+			INSERT INTO event_registrations (event_id, user_id, status, walk_in, checked_in_at)
+			VALUES ($1,$2,'attended',true,now())`, eventID, userID); err != nil {
+			web.Fail(w, err)
+			return
+		}
+
+	case err != nil:
 		web.Fail(w, err)
 		return
-	}
-	if affected, _ := result.RowsAffected(); affected == 0 {
-		web.Error(w, http.StatusConflict, "พนักงานคนนี้ยังไม่ได้ลงทะเบียน หรือเช็คอินไปแล้ว")
+
+	case current == "attended":
+		web.Error(w, http.StatusConflict, "พนักงานคนนี้เช็คอินไปแล้ว")
 		return
+
+	default:
+		if _, err := tx.Exec(`
+			UPDATE event_registrations SET status = 'attended', checked_in_at = now()
+			WHERE event_id = $1 AND user_id = $2`, eventID, userID); err != nil {
+			web.Fail(w, err)
+			return
+		}
 	}
+
+	walkIn := errors.Is(err, sql.ErrNoRows)
 
 	awarded := 0
 	if points > 0 {
@@ -919,8 +948,15 @@ func AdminCheckIn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logAudit(claims.ID, "event.check-in", body.EmployeeCode, displayName)
-	web.JSON(w, http.StatusOK, web.Map{"ok": true, "name": displayName, "points": awarded})
+	detail := displayName
+	if walkIn {
+		detail += " (เช็คอินหน้างาน ไม่ได้ลงทะเบียนล่วงหน้า)"
+	}
+	logAudit(claims.ID, "event.check-in", body.EmployeeCode, detail)
+
+	web.JSON(w, http.StatusOK, web.Map{
+		"ok": true, "name": displayName, "points": awarded, "walkIn": walkIn,
+	})
 }
 
 /* ---------- ประกาศ ---------- */

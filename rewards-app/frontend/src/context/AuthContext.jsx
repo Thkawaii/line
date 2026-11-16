@@ -21,6 +21,8 @@ export function AuthProvider({ children }) {
       user,
       ready,
       isAdmin: user?.role === 'admin',
+      // ฝ่ายธุรการ (ga) ใช้หน้าฝั่งผู้ดูแลได้เฉพาะรายงานสรุปซึ่งไม่มีรายชื่อพนักงาน
+      isStaff: user?.role === 'admin' || user?.role === 'ga',
       async login(payload) {
         const { user, token } = await api.login(payload);
         setToken(token);

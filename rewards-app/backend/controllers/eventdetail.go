@@ -47,7 +47,7 @@ func attachOptions(events []store.Row, lang string) error {
 	}
 
 	rows, err := store.Query(`
-		SELECT o.id, o.event_id, o.label, o.detail, o.sort_order,
+		SELECT o.id, o.event_id, o.label, o.detail, o.sort_order, o.translations,
 		       (SELECT count(*)::int FROM event_registrations r WHERE r.option_id = o.id) AS votes
 		FROM event_options o
 		WHERE o.event_id IN (`+placeholders+`)
@@ -55,6 +55,9 @@ func attachOptions(events []store.Row, lang string) error {
 	if err != nil {
 		return err
 	}
+
+	// ตัวเลือกโหวตคือข้อความที่ผู้ดูแลกรอก จึงต้องแปลเหมือนกับตัวกิจกรรมเอง
+	localize(rows, lang)
 
 	for _, row := range rows {
 		eventID, _ := row["event_id"].(int64)
@@ -130,12 +133,22 @@ func AdminEventRegistrations(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// ความคืบหน้ารายแผนก — แผนกนี้มีกี่คน ลงทะเบียนแล้วกี่คน เหลือกี่คน กี่เปอร์เซ็นต์
+	// นับจากพนักงานทั้งหมดที่ยังทำงานอยู่ ไม่ใช่จากคนที่ลงทะเบียนแล้ว จึงบอก "เหลือ" ได้
+	departments, progress, err := DepartmentProgress("event_registrations", "event_id", id)
+	if err != nil {
+		web.Fail(w, err)
+		return
+	}
+
 	web.JSON(w, http.StatusOK, web.Map{
 		"event":         event,
 		"registrations": people,
 		"total":         len(people),
 		"attended":      attended,
 		"tally":         tally,
+		"departments":   departments,
+		"progress":      progress,
 	})
 }
 

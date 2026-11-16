@@ -5,6 +5,7 @@ import App from './App';
 import { AuthProvider } from './context/AuthContext';
 import { ToastProvider } from './components/ui';
 import { LanguageProvider } from './lib/i18n';
+import ErrorBoundary from './components/ErrorBoundary';
 import './index.css';
 
 createRoot(document.getElementById('root')).render(
@@ -17,14 +18,17 @@ createRoot(document.getElementById('root')).render(
 
         ข้อแลกเปลี่ยน: ปุ่มย้อนกลับของเบราว์เซอร์จะออกจากเว็บแทนที่จะถอยหน้า
         ภายในแอปมีปุ่มย้อนกลับของตัวเองอยู่แล้วทุกหน้า */}
-    <MemoryRouter initialEntries={[window.location.pathname + window.location.search]}>
-      <LanguageProvider>
-        <AuthProvider>
-          <ToastProvider>
-            <App />
-          </ToastProvider>
-        </AuthProvider>
-      </LanguageProvider>
-    </MemoryRouter>
+    {/* ครอบไว้นอกสุด คอมโพเนนต์ไหนพังก็ยังเห็นข้อความบอกสาเหตุ ไม่ใช่หน้าขาวเปล่า */}
+    <ErrorBoundary>
+      <MemoryRouter initialEntries={[window.location.pathname + window.location.search]}>
+        <LanguageProvider>
+          <AuthProvider>
+            <ToastProvider>
+              <App />
+            </ToastProvider>
+          </AuthProvider>
+        </LanguageProvider>
+      </MemoryRouter>
+    </ErrorBoundary>
   </React.StrictMode>
 );

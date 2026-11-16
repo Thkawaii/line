@@ -3,6 +3,10 @@ import { useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import Membership from './Membership';
 import AdminShell from '../../components/AdminShell';
+import ComboBox from '../../components/ComboBox';
+import { useOrgOptions } from '../../lib/useOrgOptions';
+import { useAuth } from '../../context/AuthContext';
+import { ADJUST_POINTS_POSITIONS } from '../../lib/org';
 import { Badge, Modal, Notice, Pagination, SearchInput, Spinner, useToast } from '../../components/ui';
 import { Icon } from '../../components/icons';
 import { STATUS_STYLE, dateTime, num } from '../../lib/format';
@@ -10,6 +14,7 @@ import { STATUS_STYLE, dateTime, num } from '../../lib/format';
 /* ---------- Admin Accounts ---------- */
 
 function AccountsPage() {
+  const org = useOrgOptions();
   const toast = useToast();
   const [admins, setAdmins] = useState(null);
   const [open, setOpen] = useState(false);
@@ -176,23 +181,31 @@ function AccountsPage() {
               <label className="label" htmlFor="adminDept">
                 แผนก
               </label>
-              <input
+              {/* รายการสั้นเพราะผู้ดูแลระบบส่วนใหญ่มาจากงานบุคคลและธุรการ
+                  สังกัดแผนกอื่นก็เลือก "อื่นๆ" แล้วพิมพ์เองได้ */}
+              <ComboBox
                 id="adminDept"
-                className="field"
+                options={org.adminSections}
                 value={form.department}
-                onChange={(e) => setForm({ ...form, department: e.target.value })}
+                onChange={(value) => setForm({ ...form, department: value })}
+                placeholder="เลือกแผนก"
               />
             </div>
             <div>
               <label className="label" htmlFor="adminPosition">
                 ตำแหน่ง
               </label>
-              <input
+              <ComboBox
                 id="adminPosition"
-                className="field"
+                options={org.positions}
                 value={form.position}
-                onChange={(e) => setForm({ ...form, position: e.target.value })}
+                onChange={(value) => setForm({ ...form, position: value })}
+                placeholder="พิมพ์เพื่อค้นหาตำแหน่ง"
               />
+              {/* ตำแหน่งไม่ใช่แค่ข้อมูลประกอบ มันตัดสินว่าบัญชีนี้ปรับคะแนนได้ไหม */}
+              <p className="mt-1 text-2xs text-muted">
+                ตำแหน่งที่ปรับคะแนนพนักงานได้: {ADJUST_POINTS_POSITIONS.join(' / ')}
+              </p>
             </div>
             <div>
               <label className="label" htmlFor="adminPassword">
@@ -389,8 +402,34 @@ function SystemPage() {
   );
 }
 
+/*
+  เส้นทาง /admin/settings/:key ใช้ร่วมกันสองกลุ่ม
+
+    membership  "จัดการสมาชิก" เป็นเมนูหลัก พนักงานแผนกหลังบ้านใช้ได้
+    ที่เหลือ    กลุ่ม "ตั้งค่าระบบ" เป็นของผู้ดูแลระบบตัวจริงเท่านั้น
+
+  จึงกันสิทธิ์ที่ระดับหน้า ไม่ใช่ที่ระดับเส้นทาง
+  และแสดงข้อความบอกเหตุผลแทนการเด้งกลับ เพราะการเด้งเงียบ ๆ
+  ทำให้ผู้ใช้ไม่รู้ว่าเกิดอะไรขึ้น
+*/
+const ADMIN_ONLY_KEYS = ['accounts', 'audit', 'system'];
+
 export default function AdminSettings() {
   const { key } = useParams();
+  const { user } = useAuth();
+
+  if (ADMIN_ONLY_KEYS.includes(key) && user?.role !== 'admin') {
+    return (
+      <AdminShell title="ตั้งค่าระบบ" breadcrumb="ตั้งค่าระบบ">
+        <Notice tone="warn">
+          หน้านี้เปิดให้เฉพาะผู้ดูแลระบบเท่านั้น
+          <br />
+          บัญชีของคุณใช้เมนูอื่นในหน้าผู้ดูแลระบบได้ตามปกติ
+        </Notice>
+      </AdminShell>
+    );
+  }
+
   if (key === 'accounts') return <AccountsPage />;
   if (key === 'audit') return <AuditPage />;
   if (key === 'system') return <SystemPage />;

@@ -28,6 +28,15 @@ const currentLang = () => {
   }
 };
 
+// ข้อความเดียวที่ api.js พูดเอง นอกนั้นเป็นข้อความจากเซิร์ฟเวอร์
+// เก็บไว้ที่นี่แทนที่จะดึงจาก i18n เพราะไฟล์นี้ตั้งใจไม่ให้พึ่ง React
+const OFFLINE_MESSAGE = {
+  th: 'เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ',
+  en: 'Could not reach the server',
+  ja: 'サーバーに接続できませんでした',
+};
+const offlineMessage = () => OFFLINE_MESSAGE[currentLang()] || OFFLINE_MESSAGE.th;
+
 const qs = (params = {}) => {
   const entries = Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== '');
   return entries.length ? `?${new URLSearchParams(entries)}` : '';
@@ -48,8 +57,11 @@ async function request(path, { method = 'GET', body } = {}) {
   if (res.status === 204) return null;
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const error = new Error(data.error || 'เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ');
+    const error = new Error(data.error || offlineMessage());
     error.status = res.status;
+    // แนบเนื้อหาที่เซิร์ฟเวอร์ส่งมาทั้งก้อนไว้ด้วย บางกรณีมีรายละเอียดเกินข้อความเดียว
+    // เช่นตอนลงทะเบียนไม่ผ่านเพราะอยู่นอกพื้นที่ จะมีระยะห่างติดมาให้บอกผู้ใช้ได้
+    error.data = data;
     throw error;
   }
   return data;
@@ -66,8 +78,12 @@ export const api = {
   points: () => request(`/app/points${qs({ lang: currentLang() })}`),
   pointsHistory: (filter) => request(`/app/points/history${qs({ ...{ filter }, lang: currentLang() })}`),
   events: (params) => request(`/app/events${qs({ ...params, lang: currentLang() })}`),
-  registerEvent: (id, optionId) =>
-    request(`/app/events/${id}/register`, { method: 'POST', body: { optionId: optionId || 0 } }),
+  // position คือ { lat, lng } ส่งมาเฉพาะกิจกรรมที่ตั้งพื้นที่จัดงานไว้
+  registerEvent: (id, optionId, position) =>
+    request(`/app/events/${id}/register`, {
+      method: 'POST',
+      body: { optionId: optionId || 0, ...(position || {}) },
+    }),
   rewards: (params) => request(`/app/rewards${qs({ ...params, lang: currentLang() })}`),
   redeem: (id) => request(`/app/rewards/${id}/redeem`, { method: 'POST' }),
   myRewards: (status) => request(`/app/my-rewards${qs({ ...{ status }, lang: currentLang() })}`),
@@ -79,6 +95,13 @@ export const api = {
   policy: (key) => request(`/app/policies/${key}${qs({ lang: currentLang() })}`),
   qrToken: () => request(`/app/qr-token${qs({ lang: currentLang() })}`),
   tiers: () => request(`/app/tiers${qs({ lang: currentLang() })}`),
+  announcements: () => request(`/app/announcements${qs({ lang: currentLang() })}`),
+  pendingFeedback: () => request('/app/feedback/pending'),
+  submitFeedback: (id, body) => request(`/app/events/${id}/feedback`, { method: 'POST', body }),
+  acknowledgeAnnouncement: (id) =>
+    request(`/app/announcements/${id}/acknowledge`, { method: 'POST' }),
+  surveys: () => request(`/app/surveys${qs({ lang: currentLang() })}`),
+  submitSurvey: (id, body) => request(`/app/surveys/${id}/submit`, { method: 'POST', body }),
 
   /* ฝั่งแอดมิน */
   adminOverview: () => request('/admin/overview'),
@@ -102,6 +125,9 @@ export const api = {
   adminCreateEvent: (body) => request('/admin/events', { method: 'POST', body }),
   adminUpdateEvent: (id, body) => request(`/admin/events/${id}`, { method: 'PATCH', body }),
   adminEventRegistrations: (id) => request(`/admin/events/${id}/registrations`),
+  adminEventFeedback: (id) => request(`/admin/events/${id}/feedback`),
+  adminFeedback: ({ year, eventId }) =>
+    request(`/admin/feedback${qs({ range: 'custom', year, fromMonth: 1, toMonth: 12, eventId })}`),
   adminCheckIn: (id, employeeCode, allowWalkIn = false) =>
     request(`/admin/events/${id}/check-in`, { method: 'POST', body: { employeeCode, allowWalkIn } }),
   adminNotifications: () => request('/admin/notifications'),
@@ -138,5 +164,36 @@ export const api = {
   adminSaveSettings: (values) => request('/admin/settings', { method: 'PUT', body: { values } }),
 
   adminAuditLogs: (params) => request(`/admin/audit-logs${qs(params)}`),
+
+  /* คำแปลอัตโนมัติ */
+  adminOrgOptions: () => request('/admin/org-options'),
+  adminUploadDocument: (data, name) =>
+    request('/admin/uploads/document', { method: 'POST', body: { data, name } }),
+
+  adminAnnouncements: () => request('/admin/announcements'),
+  adminCreateAnnouncement: (body) => request('/admin/announcements', { method: 'POST', body }),
+  adminUpdateAnnouncement: (id, body) =>
+    request(`/admin/announcements/${id}`, { method: 'PATCH', body }),
+  adminDeleteAnnouncement: (id) => request(`/admin/announcements/${id}`, { method: 'DELETE' }),
+  adminAnnouncementReaders: (id) => request(`/admin/announcements/${id}/readers`),
+
+  adminTranslations: () => request('/admin/translations'),
+  adminTranslationItems: (table) => request(`/admin/translations/items${qs({ table })}`),
+  adminRunTranslations: () => request('/admin/translations/run', { method: 'POST' }),
+  adminRebuildTranslations: (clearCache) =>
+    request('/admin/translations/rebuild', { method: 'POST', body: { clearCache } }),
+  adminSaveTranslation: (table, body) =>
+    request(`/admin/translations/${table}`, { method: 'PUT', body }),
+
+  /* หัวข้อลงทะเบียน / แบบสำรวจ */
+  adminSurveys: () => request('/admin/surveys'),
+  adminCreateSurvey: (body) => request('/admin/surveys', { method: 'POST', body }),
+  adminUpdateSurvey: (id, body) => request(`/admin/surveys/${id}`, { method: 'PATCH', body }),
+  adminDeleteSurvey: (id) => request(`/admin/surveys/${id}`, { method: 'DELETE' }),
+  adminSurveySummary: (id) => request(`/admin/surveys/${id}/summary`),
+  adminSurveyPending: (id, section) => request(`/admin/surveys/${id}/pending${qs({ section })}`),
+  adminSurveyResponses: (id) => request(`/admin/surveys/${id}/responses`),
+  adminRemindSurvey: (id, message) =>
+    request(`/admin/surveys/${id}/remind`, { method: 'POST', body: { message } }),
   adminCreateNotification: (body) => request('/admin/notifications', { method: 'POST', body }),
 };

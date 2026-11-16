@@ -152,3 +152,46 @@
   }
 }
 
+
+/*
+แถบเลื่อนของกราฟ
+
+กราฟที่กว้างกว่ากรอบต้องมีแถบเลื่อนที่ "เห็นได้" ตลอดเวลา
+ไม่ใช่แถบจาง ๆ ที่โผล่เฉพาะตอนเลื่อนเมาส์ผ่าน ไม่งั้นผู้ใช้จะไม่รู้ว่ายังมีข้อมูลต่อ
+และคิดว่ากราฟมีแค่ที่เห็น
+
+ทำเป็นรางยาวเต็มความกว้างกับหัวเลื่อนทรงแคปซูล ให้เหมือนแบบที่ออกแบบไว้
+*/
+.chart-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: #00adb0 #e3e7e9;
+  padding-bottom: 6px;
+}
+
+.chart-scroll::-webkit-scrollbar {
+  height: 8px;
+}
+
+.chart-scroll::-webkit-scrollbar-track {
+  background: #e3e7e9;
+  border-radius: 999px;
+}
+
+.chart-scroll::-webkit-scrollbar-thumb {
+  background: #00adb0;
+  border-radius: 999px;
+}
+
+/* ซ่อนปุ่มลูกศรหัวท้ายราง บางเบราว์เซอร์ใส่มาให้เองแล้วรางดูรกกว่าแบบที่ออกแบบไว้ */
+.chart-scroll::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* ไม่มีอะไรให้เลื่อนก็ไม่ต้องมีราง จะได้ไม่หลอกตาว่ายังมีข้อมูลต่อ */
+.chart-scroll:not(.is-scrollable)::-webkit-scrollbar {
+  height: 0;
+}

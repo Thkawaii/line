@@ -1,6 +1,10 @@
 -- ระบบสะสมคะแนนพนักงาน — PostgreSQL schema
 -- รัน: psql $DATABASE_URL -f db/schema.sql
 
+DROP TABLE IF EXISTS schema_migrations  CASCADE;
+DROP TABLE IF EXISTS translation_cache   CASCADE;
+DROP TABLE IF EXISTS survey_responses    CASCADE;
+DROP TABLE IF EXISTS survey_topics       CASCADE;
 DROP TABLE IF EXISTS notification_events CASCADE;
 DROP TABLE IF EXISTS audit_logs          CASCADE;
 DROP TABLE IF EXISTS settings            CASCADE;
@@ -10,6 +14,7 @@ DROP TABLE IF EXISTS favorites           CASCADE;
 DROP TABLE IF EXISTS redemptions         CASCADE;
 DROP TABLE IF EXISTS rewards             CASCADE;
 DROP TABLE IF EXISTS event_registrations CASCADE;
+DROP TABLE IF EXISTS event_options       CASCADE;
 DROP TABLE IF EXISTS events              CASCADE;
 DROP TABLE IF EXISTS point_transactions  CASCADE;
 DROP TABLE IF EXISTS banners             CASCADE;
@@ -22,7 +27,7 @@ CREATE TABLE users (
   id             BIGSERIAL PRIMARY KEY,
   employee_code  VARCHAR(32)  NOT NULL UNIQUE,
   username       VARCHAR(64)  NOT NULL UNIQUE,
-  email          VARCHAR(255) NOT NULL UNIQUE,
+  email          VARCHAR(255) UNIQUE,          -- ไม่บังคับ ปล่อยว่างได้ ถ้ากรอกต้องไม่ซ้ำ
   password_hash  TEXT         NOT NULL,
   display_name   VARCHAR(128) NOT NULL,
   department     VARCHAR(64)  NOT NULL DEFAULT '',
@@ -72,11 +77,24 @@ CREATE TABLE events (
   CHECK (end_date IS NULL OR end_date >= event_date)
 );
 
+-- ตัวเลือกสำหรับกิจกรรมแบบโหวต กิจกรรมแบบลงทะเบียนไม่ต้องมี
+CREATE TABLE event_options (
+  id         BIGSERIAL PRIMARY KEY,
+  event_id   BIGINT       NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  label      VARCHAR(200) NOT NULL,
+  detail     VARCHAR(300) NOT NULL DEFAULT '',
+  sort_order INTEGER      NOT NULL DEFAULT 0
+);
+
+CREATE INDEX ON event_options (event_id, sort_order);
+
 CREATE TABLE event_registrations (
   id          BIGSERIAL PRIMARY KEY,
   event_id    BIGINT      NOT NULL REFERENCES events(id) ON DELETE CASCADE,
   user_id     BIGINT      NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   status      VARCHAR(16) NOT NULL DEFAULT 'registered' CHECK (status IN ('registered','attended','absent')),
+  option_id   BIGINT REFERENCES event_options(id) ON DELETE SET NULL,  -- ตัวเลือกที่โหวต
+  walk_in     BOOLEAN     NOT NULL DEFAULT false,  -- มาเช็คอินหน้างานโดยไม่ได้ลงทะเบียนล่วงหน้า
   checked_in_at TIMESTAMPTZ,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (event_id, user_id)

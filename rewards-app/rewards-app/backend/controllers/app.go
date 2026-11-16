@@ -1,16 +1,12 @@
 package controllers
 
 import (
-	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -222,6 +218,7 @@ func Events(w http.ResponseWriter, r *http.Request) {
 		SELECT e.id, e.title, e.description, e.agenda, e.image_url, e.location, e.event_date,
 		       e.end_date, e.start_time, e.end_time, e.points, e.kind, e.capacity,
 		       (r.id IS NOT NULL) AS joined,
+		       r.option_id AS chosen_option_id,
 		       (f.user_id IS NOT NULL) AS favorite,
 		       (SELECT count(*)::int FROM event_registrations x WHERE x.event_id = e.id) AS joined_count,
 		       e.translations
@@ -235,7 +232,14 @@ func Events(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	web.JSON(w, http.StatusOK, web.Map{"events": localize(rows, requestLanguage(r))})
+	lang := requestLanguage(r)
+	localize(rows, lang)
+	if err := attachOptions(rows, lang); err != nil {
+		web.Fail(w, err)
+		return
+	}
+
+	web.JSON(w, http.StatusOK, web.Map{"events": rows})
 }
 
 func RegisterEvent(w http.ResponseWriter, r *http.Request) {
@@ -246,6 +250,11 @@ func RegisterEvent(w http.ResponseWriter, r *http.Request) {
 		web.Error(w, http.StatusBadRequest, "รหัสกิจกรรมไม่ถูกต้อง")
 		return
 	}
+
+	var body struct {
+		OptionID int64 `json:"optionId"`
+	}
+	_ = web.Decode(r, &body) // กิจกรรมแบบลงทะเบียนไม่ต้องส่งอะไรมา
 
 	tx, err := config.DB.Begin()
 	if err != nil {
@@ -294,8 +303,26 @@ func RegisterEvent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// กิจกรรมโหวตต้องเลือกตัวเลือกก่อน และตัวเลือกต้องเป็นของกิจกรรมนี้จริง
+	var optionID any
+	if kind == "vote" {
+		msg, err := checkVoteOption(tx, eventID, body.OptionID)
+		if err != nil {
+			web.Fail(w, err)
+			return
+		}
+		if msg != "" {
+			web.Error(w, http.StatusBadRequest, msg)
+			return
+		}
+		if body.OptionID > 0 {
+			optionID = body.OptionID
+		}
+	}
+
 	if _, err := tx.Exec(
-		`INSERT INTO event_registrations (event_id, user_id) VALUES ($1,$2)`, eventID, claims.ID); err != nil {
+		`INSERT INTO event_registrations (event_id, user_id, option_id) VALUES ($1,$2,$3)`,
+		eventID, claims.ID, optionID); err != nil {
 		web.Fail(w, err)
 		return
 	}
@@ -349,7 +376,9 @@ func Rewards(w http.ResponseWriter, r *http.Request) {
 		args = append(args, "%"+q+"%")
 		where = append(where, fmt.Sprintf(`r.name ILIKE $%d`, len(args)))
 	}
-	if category := web.Param(r, "category", ""); category != "" && category != "ทั้งหมด" {
+	// ค่าว่างคือไม่กรองหมวด หน้าเว็บส่งค่าว่างมาเมื่อผู้ใช้เลือก "ทั้งหมด"
+	// ไม่เทียบกับคำว่า "ทั้งหมด" เพราะหน้าเว็บมีสามภาษา คำนั้นจึงไม่คงที่
+	if category := web.Param(r, "category", ""); category != "" {
 		args = append(args, category)
 		where = append(where, fmt.Sprintf(`r.category = $%d`, len(args)))
 	}
@@ -622,13 +651,15 @@ func Notifications(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := store.Query(`
-		SELECT id, category, title, body, read_at, created_at FROM notifications
+		SELECT id, category, title, body, read_at, created_at, translations FROM notifications
 		WHERE (user_id = $1 OR user_id IS NULL) `+filter+`
 		ORDER BY created_at DESC LIMIT 100`, args...)
 	if err != nil {
 		web.Fail(w, err)
 		return
 	}
+
+	localize(rows, requestLanguage(r))
 
 	unread := 0
 	for _, row := range rows {
@@ -710,36 +741,3 @@ func Tiers(w http.ResponseWriter, r *http.Request) {
 }
 
 /* ---------- QR ประจำตัว ---------- */
-
-// QrToken สร้างโทเค็นอายุสั้นสำหรับ QR ประจำตัว
-// เซ็นด้วย HMAC เพื่อให้ฝั่งที่สแกนตรวจได้ว่าเป็นของจริงและยังไม่หมดอายุ
-func QrToken(w http.ResponseWriter, r *http.Request) {
-	claims := middleware.CurrentUser(r)
-
-	user, err := store.QueryOne(
-		`SELECT employee_code, display_name, department FROM users WHERE id = $1`, claims.ID)
-	if err != nil {
-		web.Fail(w, err)
-		return
-	}
-	if user == nil {
-		web.Error(w, http.StatusNotFound, "ไม่พบบัญชีนี้")
-		return
-	}
-
-	expiresIn, err := strconv.Atoi(setting("qr_ttl_seconds", "300"))
-	if err != nil || expiresIn <= 0 {
-		expiresIn = 300
-	}
-
-	payload := fmt.Sprintf("%d.%d", claims.ID, time.Now().Add(time.Duration(expiresIn)*time.Second).UnixMilli())
-
-	mac := hmac.New(sha256.New, []byte(os.Getenv("JWT_SECRET")))
-	mac.Write([]byte(payload))
-	signature := hex.EncodeToString(mac.Sum(nil))[:16]
-
-	user["token"] = payload + "." + signature
-	user["expiresIn"] = expiresIn
-
-	web.JSON(w, http.StatusOK, user)
-}

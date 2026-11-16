@@ -74,6 +74,7 @@ const CARDS = {
     chipOn: 'bg-primary text-white',
     chipOff: 'bg-line text-muted',
     ring: 'ring-primary',
+    divider: 'border-[#C6DCE6]',
   },
   sky: {
     surface: 'bg-gradient-to-br from-primary to-[#0B7E82]',
@@ -86,6 +87,7 @@ const CARDS = {
     chipOn: 'bg-white text-primary-dark',
     chipOff: 'bg-white/25 text-white',
     ring: 'ring-white',
+    divider: 'border-white/25',
   },
   gold: {
     surface: 'bg-gradient-to-br from-[#223240] to-[#121C24]',
@@ -98,6 +100,7 @@ const CARDS = {
     chipOn: 'bg-gold text-[#15232B]',
     chipOff: 'bg-white/15 text-white/80',
     ring: 'ring-gold',
+    divider: 'border-white/15',
   },
 };
 
