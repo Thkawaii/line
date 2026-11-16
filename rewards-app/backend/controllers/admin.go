@@ -72,7 +72,7 @@ func AdminOverview(w http.ResponseWriter, r *http.Request) {
 	eventStats, err := store.Query(`
 		SELECT e.id, e.title, e.event_date, e.end_date, e.capacity,
 		       (SELECT count(*)::int FROM event_registrations r WHERE r.event_id = e.id) AS joined
-		FROM events e WHERE e.status = 'open' ORDER BY e.event_date LIMIT 5`)
+		FROM events e WHERE e.status = 'open' ORDER BY e.event_date DESC LIMIT 5`)
 	if err != nil {
 		web.Fail(w, err)
 		return
