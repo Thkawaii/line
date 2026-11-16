@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"rewards/middleware"
+	"rewards/org"
 	"rewards/security"
 	"rewards/store"
 	"rewards/web"
@@ -62,8 +63,23 @@ func Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	/*
+		ใครเข้าช่อง "ผู้ดูแลระบบ" ได้บ้าง
+
+		  role admin  ผู้ดูแลระบบตัวจริง
+		  role ga     บัญชีฝ่ายธุรการที่สร้างไว้แต่เดิม
+		  role user   ที่สังกัดแผนกหลังบ้าน (GA, ER, HR, HRM, HRD)
+
+		กลุ่มสุดท้ายคือพนักงานทั่วไปที่ใช้ "รหัสพนักงานกับรหัสผ่านเดิม" เข้าได้ทั้งสองฝั่ง
+		ไม่ต้องสร้างบัญชีผู้ดูแลระบบแยกอีกใบ และไม่ต้องจำรหัสผ่านสองชุด
+
+		สิ่งที่พวกเขาทำไม่ได้คือกลุ่มเมนู "ตั้งค่าระบบ" ซึ่งกันไว้ที่ middleware.RequireAdmin
+	*/
 	role, _ := user["role"].(string)
-	if body.Role == "admin" && role != "admin" {
+	department, _ := user["department"].(string)
+
+	if body.Role == "admin" && role != "admin" && role != "ga" &&
+		!org.IsBackOfficeSection(department) {
 		web.Error(w, http.StatusForbidden, "บัญชีนี้ไม่มีสิทธิ์เข้าหน้าผู้ดูแลระบบ")
 		return
 	}

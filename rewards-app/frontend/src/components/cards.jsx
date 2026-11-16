@@ -1,4 +1,5 @@
 import { Icon } from './icons';
+import { SpecialPointIcon } from './SpecialPoints';
 import { ImagePlaceholder } from './ui';
 import { dateRange, num, timeRange } from '../lib/format';
 import { useT } from '../lib/i18n';
@@ -55,11 +56,28 @@ export function EventCard({ event, onOpen, onRegister, onFavorite }) {
           )}
         </div>
 
-        <div className="mt-3 flex items-center justify-between gap-3">
+        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
           <p className="text-sm text-muted">
             {t('events.receive')} <span className="text-base font-bold text-primary">{num(event.points)}</span>{' '}
             {t('common.points')}
           </p>
+
+          {/* บอกตั้งแต่หน้ารายการว่ากิจกรรมนี้ตรวจตำแหน่ง พนักงานจะได้ไม่กดจากที่บ้าน
+              แล้วเจอข้อความปฏิเสธโดยไม่รู้สาเหตุ */}
+          {event.needs_location && (
+            <p className="flex w-full items-center gap-1 text-2xs font-medium text-gold-ink">
+              <Icon.Pin size={13} /> {t('events.needsLocation')}
+            </p>
+          )}
+
+          {/* กิจกรรมที่แถมคะแนนพิเศษต้องเห็นตั้งแต่หน้ารายการ ไม่งั้นแรงจูงใจหายไปเปล่า ๆ */}
+          {event.special_points > 0 && (
+            <p className="flex items-center gap-1 text-sm text-muted">
+              <SpecialPointIcon size={18} />
+              <span className="text-base font-bold text-primary">{num(event.special_points)}</span>
+              {t('points.special')}
+            </p>
+          )}
         </div>
 
         <button
@@ -93,10 +111,14 @@ export function TierTag({ tier }) {
   );
 }
 
-export function RewardCard({ reward, myPoints, onOpen, onFavorite, onRedeem }) {
+export function RewardCard({ reward, myPoints, mySpecialPoints, onOpen, onFavorite, onRedeem }) {
   const t = useT();
   const locked = !!reward.locked;
-  const notEnough = !locked && myPoints != null && myPoints < reward.points;
+
+  // ของรางวัลแต่ละชิ้นแลกด้วยกระเป๋าเดียว จึงเทียบกับยอดของกระเป๋านั้นเท่านั้น
+  const special = reward.point_kind === 'special';
+  const balance = special ? mySpecialPoints : myPoints;
+  const notEnough = !locked && balance != null && balance < reward.points;
   const soldOut = reward.stock <= 0;
   const daysLeft = reward.days_left;
   const limited = daysLeft !== null && daysLeft !== undefined;
@@ -146,21 +168,29 @@ export function RewardCard({ reward, myPoints, onOpen, onFavorite, onRedeem }) {
         </div>
 
         <p className="mt-1 flex items-center gap-1.5">
-          {notEnough && (
-            <span className="text-slate">
-              <Icon.Star size={16} />
-            </span>
+          {/* คะแนนพิเศษใช้ไอคอน K-Point แทนดาว ผู้ใช้จึงแยกออกทันทีว่าจ่ายด้วยอะไร
+              โดยไม่ต้องอ่านคำกำกับ */}
+          {special ? (
+            <SpecialPointIcon size={18} />
+          ) : (
+            notEnough && (
+              <span className="text-slate">
+                <Icon.Star size={16} />
+              </span>
+            )
           )}
           {reward.old_points && (
             <span className="text-2xs text-muted line-through">{num(reward.old_points)}</span>
           )}
           <span className="text-base font-bold text-primary">{num(reward.points)}</span>
-          <span className="text-2xs text-muted">{t('common.points')}</span>
+          <span className="text-2xs text-muted">
+            {special ? t('points.special') : t('common.points')}
+          </span>
         </p>
 
         {notEnough && (
           <p className="mt-0.5 text-2xs text-gold">
-            {t('rewards.needMore', { points: num(reward.points - myPoints) })}
+            {t('rewards.needMore', { points: num(reward.points - balance) })}
           </p>
         )}
 

@@ -1,0 +1,81 @@
+# docker-compose สำหรับ deploy บน cloud ที่มีชื่อโดเมนจริง
+#
+# ต่างจาก docker-compose.prod.yml ตรงเดียว คือใช้ Caddy แทน nginx
+# เพื่อให้ได้ใบรับรองจาก Let's Encrypt อัตโนมัติ ผู้ใช้จะไม่เจอหน้าคำเตือนเรื่องความปลอดภัย
+# และการระบุตำแหน่งตอนลงทะเบียนกิจกรรมก็ทำงานได้ เพราะเบราว์เซอร์เปิดให้เฉพาะ https
+#
+# เตรียมก่อนรัน
+#   1. ชี้ A record ของโดเมนมาที่ IP ของเครื่องนี้
+#   2. เปิดพอร์ต 80 กับ 443 ที่ firewall / security group
+#   3. ใส่ค่าสองบรรทัดนี้ในไฟล์ rewards.env
+#        SITE_DOMAIN=rewards.example.com
+#        ACME_EMAIL=it@example.com
+#
+# รัน:  docker compose -f docker-compose.cloud.yml up -d --build
+# ผู้ใช้เข้าที่  https://rewards.example.com  (ไม่มีเลขพอร์ต ไม่มีคำเตือน)
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file: ./rewards.env
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    env_file: ./rewards.env
+    environment:
+      TZ: Asia/Bangkok
+      PORT: 4007
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - uploads:/app/uploads
+    # ไม่เปิดพอร์ตออกนอกเครื่อง คุยผ่านเครือข่ายภายใน docker กับ caddy เท่านั้น
+    expose:
+      - '4007'
+
+  # สร้างไฟล์หน้าเว็บแล้วจบ ไม่ได้รันค้างไว้
+  # ผลลัพธ์วางไว้ใน volume ให้ caddy เสิร์ฟต่อ
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # ปล่อยว่าง = ยิง API ที่โดเมนเดียวกับหน้าเว็บ แล้วให้ caddy ส่งต่อ
+        VITE_API_URL: ''
+    command: >
+      sh -c "rm -rf /export/* && cp -r /usr/share/nginx/html/. /export/"
+    volumes:
+      - web:/export
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    env_file: ./rewards.env # SITE_DOMAIN, ACME_EMAIL
+    ports:
+      - '80:80' # ใช้ตอนขอและต่ออายุใบรับรอง
+      - '443:443'
+      - '443:443/udp' # HTTP/3
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - web:/srv:ro
+      - caddy-data:/data # เก็บใบรับรองไว้ ไม่ต้องขอใหม่ทุกครั้งที่รีสตาร์ท
+      - caddy-config:/config
+    depends_on:
+      - backend
+      - frontend
+
+volumes:
+  pgdata:
+  uploads:
+  web:
+  caddy-data:
+  caddy-config:

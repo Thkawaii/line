@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { Icon } from './icons';
-import { initials } from '../lib/format';
 import { useT } from '../lib/i18n';
+import { initials } from '../lib/format';
 
 export function Avatar({ name, src, size = 40 }) {
   if (src) {
@@ -69,6 +69,8 @@ export function Notice({ children, tone = 'error' }) {
 
 /* กล่องซ้อนแบบในดีไซน์: พื้นหลังมืด กดนอกกล่องเพื่อปิด */
 export function Modal({ open, onClose, children, size = 'md' }) {
+  const t = useT();
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e) => e.key === 'Escape' && onClose?.();
@@ -87,7 +89,7 @@ export function Modal({ open, onClose, children, size = 'md' }) {
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true">
       <button
         className="absolute inset-0 cursor-default bg-ink/45"
-        aria-label="ปิดหน้าต่าง"
+        aria-label={t('common.closeWindow')}
         onClick={onClose}
       />
       <div
@@ -96,7 +98,7 @@ export function Modal({ open, onClose, children, size = 'md' }) {
         {onClose && (
           <button
             onClick={onClose}
-            aria-label="ปิด"
+            aria-label={t('common.close')}
             className="absolute right-3 top-3 z-10 grid h-9 w-9 place-items-center rounded-full bg-white/90 text-slate shadow-card hover:bg-line"
           >
             <Icon.Close size={18} />
@@ -164,7 +166,11 @@ export function ConfirmDialog({
           <Icon.Trash size={26} />
         </span>
         <h2 className="mt-4 text-lg font-bold text-ink">{title}</h2>
-        {message && <p className="mt-2 text-sm leading-relaxed text-muted">{message}</p>}
+        {/* whitespace-pre-line ให้ขึ้นบรรทัดใหม่ตามที่เขียนมาได้
+            ข้อความยืนยันบางอันต้องแยกย่อหน้า ไม่งั้นอ่านแล้วตาลาย */}
+        {message && (
+          <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-muted">{message}</p>
+        )}
         <div className="mt-6 flex gap-3">
           <button type="button" onClick={onCancel} disabled={busy} className="btn-ghost flex-1">
             {cancelLabel || t('common.cancel')}
@@ -232,7 +238,10 @@ export function ChipBar({ options, value, onChange, className = '' }) {
   );
 }
 
-export function SearchInput({ value, onChange, placeholder = 'ค้นหา' }) {
+export function SearchInput({ value, onChange, placeholder }) {
+  const t = useT();
+  const label = placeholder || t('common.search');
+
   return (
     <div className="relative">
       <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted">
@@ -241,8 +250,8 @@ export function SearchInput({ value, onChange, placeholder = 'ค้นหา' }
       <input
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        aria-label={placeholder}
+        placeholder={label}
+        aria-label={label}
         className="field h-11 py-0 pl-10"
       />
     </div>
@@ -296,6 +305,7 @@ export function ProgressBar({ value, max, tone = 'gold', track = 'bg-[#D9D9D9]' 
 }
 
 export function Pagination({ page, total, limit, onChange }) {
+  const t = useT();
   const pages = Math.max(1, Math.ceil(total / limit));
   const near = [1, 2, 3, page - 1, page, page + 1, pages - 2, pages - 1, pages]
     .filter((n) => n >= 1 && n <= pages)
@@ -304,9 +314,7 @@ export function Pagination({ page, total, limit, onChange }) {
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm text-slate">
-      <span>
-        หน้า {page} จาก {pages}
-      </span>
+      <span>{t('common.pageOf', { page, pages })}</span>
       <div className="flex items-center gap-1">
         <button disabled={page === 1} onClick={() => onChange(1)} className="rounded px-2 py-1 disabled:opacity-40">
           «

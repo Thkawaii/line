@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import AdminShell from '../../components/AdminShell';
-import { Modal, Notice, SearchInput, Spinner, useToast } from '../../components/ui';
+import { ConfirmDialog, Modal, Notice, SearchInput, Spinner, useToast } from '../../components/ui';
+import { Select } from '../../components/ComboBox';
 import { Icon } from '../../components/icons';
 import TranslatedFields from '../../components/TranslatedFields';
 import { num } from '../../lib/format';
@@ -219,11 +220,13 @@ export default function Membership() {
     }
   }
 
+  const [confirmRemove, setConfirmRemove] = useState(false);
+
   async function remove() {
-    if (!window.confirm(`ลบระดับ ${editing.name} ใช่ไหม`)) return;
     try {
       await api.adminDeleteTier(editing.key);
       toast('ลบระดับสมาชิกแล้ว');
+      setConfirmRemove(false);
       setOpen(false);
       load();
     } catch (err) {
@@ -275,15 +278,18 @@ export default function Membership() {
 
             <label className="flex items-center gap-2 text-sm text-slate">
               สถานะ
-              <select
-                value={filters.status}
-                onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value }))}
-                className="field h-10 w-36 py-0"
-              >
-                <option value="">ทั้งหมด</option>
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-              </select>
+              <div className="w-36">
+                <Select
+                  options={[
+                    { value: '', label: 'ทั้งหมด' },
+                    { value: 'active', label: 'Active' },
+                    { value: 'inactive', label: 'Inactive' },
+                  ]}
+                  value={filters.status}
+                  onChange={(value) => setFilters((f) => ({ ...f, status: value }))}
+                  placeholder="ทั้งหมด"
+                />
+              </div>
             </label>
 
             <button
@@ -364,30 +370,30 @@ export default function Membership() {
               <label className="label" htmlFor="tierColor">
                 ธีมการ์ด
               </label>
-              <select
+              <Select
                 id="tierColor"
-                className="field"
+                options={[
+                  { value: 'slate', label: 'พื้นขาว (ระดับเริ่มต้น)' },
+                  { value: 'sky', label: 'พื้นเทอร์ควอยซ์' },
+                  { value: 'gold', label: 'พื้นเข้ม ขอบทอง' },
+                ]}
                 value={form.color}
-                onChange={(e) => setForm({ ...form, color: e.target.value })}
-              >
-                <option value="slate">พื้นขาว (ระดับเริ่มต้น)</option>
-                <option value="sky">พื้นเทอร์ควอยซ์</option>
-                <option value="gold">พื้นเข้ม ขอบทอง</option>
-              </select>
+                onChange={(value) => setForm({ ...form, color: value })}
+              />
             </div>
             <div>
               <label className="label" htmlFor="tierStatus">
                 สถานะ
               </label>
-              <select
+              <Select
                 id="tierStatus"
-                className="field"
+                options={[
+                  { value: 'active', label: 'Active' },
+                  { value: 'inactive', label: 'Inactive' },
+                ]}
                 value={form.status}
-                onChange={(e) => setForm({ ...form, status: e.target.value })}
-              >
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-              </select>
+                onChange={(value) => setForm({ ...form, status: value })}
+              />
             </div>
             <div className="sm:col-span-2">
               <TranslatedFields
@@ -400,7 +406,7 @@ export default function Membership() {
 
           <div className="mt-7 flex items-center justify-between gap-3">
             {editing ? (
-              <button type="button" onClick={remove} className="text-sm font-medium text-danger">
+              <button type="button" onClick={() => setConfirmRemove(true)} className="text-sm font-medium text-danger">
                 ลบระดับนี้
               </button>
             ) : (
@@ -418,6 +424,15 @@ export default function Membership() {
           </div>
         </form>
       </Modal>
+
+      <ConfirmDialog
+        open={confirmRemove}
+        title={`ลบระดับ ${editing?.name ?? ''} ใช่ไหม`}
+        message="พนักงานที่อยู่ระดับนี้จะถูกคำนวณระดับใหม่จากคะแนนที่มี การลบย้อนกลับไม่ได้"
+        confirmLabel="ลบระดับ"
+        onConfirm={remove}
+        onCancel={() => setConfirmRemove(false)}
+      />
     </AdminShell>
   );
 }

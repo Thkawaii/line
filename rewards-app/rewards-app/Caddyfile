@@ -1,0 +1,44 @@
+# Caddy สำหรับ deploy บน cloud ที่มีชื่อโดเมนจริง
+#
+# ต่างจาก nginx.prod.conf ตรงที่ไม่ต้องเตรียมใบรับรองเอง
+# Caddy ขอใบรับรองจาก Let's Encrypt ให้อัตโนมัติตอนเริ่มทำงาน และต่ออายุให้เองตลอด
+# ใบรับรองจาก Let's Encrypt เบราว์เซอร์ทุกตัวเชื่อถืออยู่แล้ว
+# ผู้ใช้จึงไม่เจอหน้าคำเตือน "การเชื่อมต่อไม่เป็นส่วนตัว" ให้ต้องกดผ่าน
+#
+# สิ่งที่ต้องมีก่อน
+#   1. ชื่อโดเมนที่ชี้ A record มาที่ IP ของเครื่อง เช่น rewards.example.com
+#   2. เปิดพอร์ต 80 และ 443 เข้าเครื่อง (80 ใช้ตอนยืนยันความเป็นเจ้าของโดเมน)
+#
+# ตั้งชื่อโดเมนกับอีเมลไว้ในไฟล์ rewards.env  ดู docker-compose.cloud.yml
+
+{
+	# อีเมลสำหรับแจ้งเตือนเมื่อใบรับรองใกล้หมดอายุ
+	email {$ACME_EMAIL}
+}
+
+{$SITE_DOMAIN} {
+	encode gzip
+
+	# ไฟล์ที่อัปโหลดเก็บอยู่ที่ backend
+	handle /uploads/* {
+		reverse_proxy backend:4007
+	}
+
+	handle /api/* {
+		reverse_proxy backend:4007
+	}
+
+	# หน้าเว็บเป็น single page app เส้นทางที่ไม่ใช่ไฟล์จริงต้องตกมาที่ index.html
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+
+	# index.html ห้าม cache ไม่งั้นผู้ใช้ค้างอยู่กับเวอร์ชันเก่าหลัง deploy
+	header /index.html Cache-Control "no-cache"
+
+	request_body {
+		max_size 20MB
+	}
+}

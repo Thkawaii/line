@@ -19,22 +19,22 @@ import (
 ทุกคนถูกตัดยอดคะแนนในวันที่กำหนด (ตั้งได้ที่หน้า System Settings)
 คะแนนกลับไปเป็น 0 ทุกคนเท่ากัน สิ่งที่ต่างกันคือระดับที่รักษาไว้ได้
 
-เงื่อนไขการคงระดับดูจาก "คะแนนที่ใช้ไป" ตลอดรอบปีที่ผ่านมา ไม่ใช่คะแนนคงเหลือ
-เพราะคนที่แลกของบ่อยคือคนที่ใช้งานระบบจริง ถ้าวัดจากคะแนนคงเหลือ
-คนที่เก็บคะแนนไว้เฉย ๆ จะได้เปรียบคนที่แลกของ ซึ่งกลับด้านกับที่ควรเป็น
+เงื่อนไขการคงระดับดูจาก "คะแนนที่ได้รับ" ตลอดรอบปีที่ผ่านมา ไม่ใช่คะแนนคงเหลือ
+เพราะคนที่เข้าร่วมกิจกรรมและได้รับคะแนนสม่ำเสมอคือคนที่มีส่วนร่วมกับระบบจริง
+(เดิมวัดจากคะแนนที่ใช้แลกของรางวัล เปลี่ยนมาวัดจากคะแนนที่ได้รับแทน)
 
-	ระดับเดิม   คะแนนที่ใช้ในรอบปี   ระดับหลังรีเซ็ต   คะแนนหลังรีเซ็ต
-	Member     ไม่กำหนด             Member           0
-	Silver     ตั้งแต่ 500          Silver           0
-	Silver     ต่ำกว่า 500          Member           0
-	Elite      ตั้งแต่ 1,000        Elite            0
-	Elite      ต่ำกว่า 1,000        Silver           0
+	ระดับเดิม   คะแนนที่ได้รับในรอบปี   ระดับหลังรีเซ็ต   คะแนนหลังรีเซ็ต
+	Member     ไม่กำหนด               Member           0
+	Silver     ตั้งแต่ 500            Silver           0
+	Silver     ต่ำกว่า 500            Member           0
+	Elite      ตั้งแต่ 1,000          Elite            0
+	Elite      ต่ำกว่า 1,000          Silver           0
 */
 
-// เกณฑ์คะแนนที่ต้องใช้เพื่อคงระดับ และระดับที่จะถูกลดลงไปถ้าทำไม่ถึง
+// เกณฑ์คะแนนที่ต้องได้รับเพื่อคงระดับ และระดับที่จะถูกลดลงไปถ้าทำไม่ถึง
 var retention = map[string]struct {
-	needSpent int
-	fallback  string
+	needEarned int
+	fallback   string
 }{
 	"Silver": {500, "Member"},
 	"Elite":  {1000, "Silver"},
@@ -63,11 +63,11 @@ func RunAnnualReset(actorID int64, cycleStart time.Time) (AnnualResetSummary, er
 	}
 	defer tx.Rollback()
 
-	// คะแนนที่ใช้ไปตลอดรอบปี นับจากรายการที่หักคะแนนทั้งหมด
+	// คะแนนที่ได้รับตลอดรอบปี นับจากรายการที่เพิ่มคะแนนทั้งหมด
 	people, err := tx.Query(`
 		SELECT u.id, u.tier,
-		       COALESCE((SELECT sum(-t.points) FROM point_transactions t
-		                 WHERE t.user_id = u.id AND t.points < 0 AND t.created_at >= $1), 0)::int AS spent
+		       COALESCE((SELECT sum(t.points) FROM point_transactions t
+		                 WHERE t.user_id = u.id AND t.points > 0 AND t.created_at >= $1), 0)::int AS earned
 		FROM users u WHERE u.role = 'user'`, cycleStart)
 	if err != nil {
 		return summary, err
@@ -83,15 +83,15 @@ func RunAnnualReset(actorID int64, cycleStart time.Time) (AnnualResetSummary, er
 	for people.Next() {
 		var id int64
 		var tier string
-		var spent int
-		if err := people.Scan(&id, &tier, &spent); err != nil {
+		var earned int
+		if err := people.Scan(&id, &tier, &earned); err != nil {
 			people.Close()
 			return summary, err
 		}
 
 		next := tier
 		rule, hasRule := retention[tier]
-		if hasRule && spent < rule.needSpent {
+		if hasRule && earned < rule.needEarned {
 			next = rule.fallback
 		}
 
@@ -228,8 +228,8 @@ func AdminResetStatus(w http.ResponseWriter, r *http.Request) {
 	pending, err := store.Count(`
 		SELECT count(*)::int FROM users u
 		WHERE u.role = 'user' AND u.tier <> 'Member'
-		  AND COALESCE((SELECT sum(-t.points) FROM point_transactions t
-		                WHERE t.user_id = u.id AND t.points < 0 AND t.created_at >= $1), 0)
+		  AND COALESCE((SELECT sum(t.points) FROM point_transactions t
+		                WHERE t.user_id = u.id AND t.points > 0 AND t.created_at >= $1), 0)
 		      < CASE u.tier WHEN 'Silver' THEN 500 WHEN 'Elite' THEN 1000 ELSE 0 END`,
 		resetDate(time.Now().Year()-1))
 	if err != nil && err != sql.ErrNoRows {

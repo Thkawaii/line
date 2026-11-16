@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import AdminShell from '../../components/AdminShell';
+import { Select } from '../../components/ComboBox';
+import EventSummary from '../../components/EventSummary';
+import { SpecialPointIcon } from '../../components/SpecialPoints';
+import { getPosition } from '../../lib/geolocation';
+import { useAuth } from '../../context/AuthContext';
+import { isBackOffice } from '../../lib/org';
 import { Badge, Modal, Notice, Spinner, useToast } from '../../components/ui';
 import { Icon } from '../../components/icons';
 import RegistrationSheet from '../../components/RegistrationSheet';
@@ -13,7 +19,7 @@ const TEXT_FIELDS = [
   { name: 'title', label: 'ชื่อกิจกรรม', required: true, full: true },
   { name: 'location', label: 'สถานที่', full: true },
   { name: 'description', label: 'รายละเอียด', type: 'textarea', rows: 3 },
-  { name: 'agenda', label: 'กำหนดการ (บรรทัดละหนึ่งช่วงเวลา)', type: 'textarea', rows: 3 },
+  { name: 'agenda', label: 'กำหนดการ', type: 'textarea', rows: 3 },
 ];
 
 /**
@@ -119,6 +125,11 @@ const EMPTY = {
   startTime: '09:00',
   endTime: '12:00',
   points: '',
+  specialPoints: '',
+  specialPointsExpireAt: '',
+  venueLat: '',
+  venueLng: '',
+  venueRadius: 150,
   kind: 'register',
   capacity: '',
   status: 'open',
@@ -145,6 +156,11 @@ function EventForm({ open, editing, onClose, onSaved }) {
             startTime: editing.start_time.slice(0, 5),
             endTime: editing.end_time.slice(0, 5),
             points: editing.points,
+            specialPoints: editing.special_points || '',
+            specialPointsExpireAt: (editing.special_points_expire_at || '').slice(0, 10),
+            venueLat: editing.venue_lat ?? '',
+            venueLng: editing.venue_lng ?? '',
+            venueRadius: editing.venue_radius ?? 150,
             kind: editing.kind,
             capacity: editing.capacity,
             status: editing.status,
@@ -159,6 +175,21 @@ function EventForm({ open, editing, onClose, onSaved }) {
 
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
 
+  /** เติมพิกัดจากตำแหน่งที่ผู้ดูแลยืนอยู่ สะดวกกว่าไปหาพิกัดจากแผนที่มากรอกเอง */
+  async function useMyLocation() {
+    try {
+      const spot = await getPosition();
+      setForm((f) => ({
+        ...f,
+        // ทศนิยม 6 ตำแหน่งละเอียดระดับ 0.1 เมตร พอเกินพอสำหรับงานนี้
+        venueLat: spot.lat.toFixed(6),
+        venueLng: spot.lng.toFixed(6),
+      }));
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
   async function submit(event) {
     event.preventDefault();
     const payload = {
@@ -168,6 +199,12 @@ function EventForm({ open, editing, onClose, onSaved }) {
       // ส่งค่าว่างไปด้วยเพื่อให้ล้างวันสิ้นสุดได้ ไม่ใช่แค่ตั้งใหม่
       endDate: form.endDate || '',
       points: Number(form.points || 0),
+      specialPoints: Number(form.specialPoints || 0),
+      specialPointsExpireAt: form.specialPointsExpireAt || '',
+      // ส่ง null เมื่อเว้นว่าง = เลิกตรวจตำแหน่ง
+      venueLat: form.venueLat === '' ? null : Number(form.venueLat),
+      venueLng: form.venueLng === '' ? null : Number(form.venueLng),
+      venueRadius: Number(form.venueRadius) || 150,
       capacity: Number(form.capacity || 0),
     };
     try {
@@ -232,11 +269,118 @@ function EventForm({ open, editing, onClose, onSaved }) {
             <input id="points" type="number" min="0" className="field" value={form.points} onChange={set('points')} />
           </div>
           <div>
+            <label className="label" htmlFor="specialPoints">
+              <span className="inline-flex items-center gap-1.5">
+                <SpecialPointIcon size={18} /> คะแนนพิเศษ
+              </span>
+            </label>
+            <input
+              id="specialPoints"
+              type="number"
+              min="0"
+              className="field"
+              value={form.specialPoints}
+              onChange={set('specialPoints')}
+            />
+            {/* อธิบายไว้เพราะเป็นกระเป๋าคนละใบกับคะแนนปกติ ไม่ใช่โบนัสที่บวกรวมกัน */}
+            <p className="mt-1 text-2xs text-muted">
+              ได้เพิ่มจากคะแนนปกติ เก็บแยกกระเป๋าและใช้แลกเฉพาะของรางวัลที่ตั้งเป็นคะแนนพิเศษ
+            </p>
+          </div>
+
+          {/* ช่องวันหมดอายุโผล่เมื่อกิจกรรมนี้ให้คะแนนพิเศษจริงเท่านั้น
+              กิจกรรมที่ไม่ให้คะแนนพิเศษไม่ต้องมีช่องนี้มารกฟอร์ม */}
+          {Number(form.specialPoints) > 0 && (
+            <div className="sm:col-span-2">
+              <label className="label" htmlFor="specialPointsExpireAt">
+                <span className="inline-flex items-center gap-1.5">
+                  <SpecialPointIcon size={18} /> คะแนนพิเศษหมดอายุวันที่
+                </span>
+              </label>
+              <input
+                id="specialPointsExpireAt"
+                type="date"
+                className="field"
+                value={form.specialPointsExpireAt}
+                onChange={set('specialPointsExpireAt')}
+              />
+              <p className="mt-1 text-2xs text-muted">
+                เว้นว่างไว้ = ไม่มีวันหมดอายุ · พ้นวันนี้แล้วคะแนนพิเศษจะถูกตัดเหลือ 0
+                ทั้งของคนที่ได้จากกิจกรรมนี้และยอดที่สะสมไว้ก่อนหน้า
+              </p>
+            </div>
+          )}
+          <div>
             <label className="label" htmlFor="capacity">
               จำนวนที่รับ (0 = ไม่จำกัด)
             </label>
             <input id="capacity" type="number" min="0" className="field" value={form.capacity} onChange={set('capacity')} />
           </div>
+          {/* พื้นที่จัดงาน — เว้นว่างไว้คือไม่ตรวจตำแหน่ง */}
+          <fieldset className="rounded-[10px] border border-line p-4 sm:col-span-2">
+            <legend className="px-1 text-sm font-semibold text-ink">
+              พื้นที่จัดงาน (ไม่บังคับ)
+            </legend>
+            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+              <div>
+                <label className="label" htmlFor="venueLat">
+                  ละติจูด
+                </label>
+                <input
+                  id="venueLat"
+                  className="field"
+                  value={form.venueLat}
+                  onChange={set('venueLat')}
+                />
+              </div>
+              <div>
+                <label className="label" htmlFor="venueLng">
+                  ลองจิจูด
+                </label>
+                <input
+                  id="venueLng"
+                  className="field"
+                  value={form.venueLng}
+                  onChange={set('venueLng')}
+                />
+              </div>
+              <div>
+                <label className="label" htmlFor="venueRadius">
+                  รัศมี (เมตร)
+                </label>
+                <input
+                  id="venueRadius"
+                  type="number"
+                  min="20"
+                  className="field"
+                  value={form.venueRadius}
+                  onChange={set('venueRadius')}
+                />
+              </div>
+            </div>
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button type="button" onClick={useMyLocation} className="btn-ghost btn-sm">
+                <Icon.Pin size={16} /> ใช้ตำแหน่งปัจจุบัน
+              </button>
+              {(form.venueLat !== '' || form.venueLng !== '') && (
+                <button
+                  type="button"
+                  onClick={() => setForm((f) => ({ ...f, venueLat: '', venueLng: '' }))}
+                  className="btn-ghost btn-sm text-danger"
+                >
+                  ล้างพิกัด (เลิกตรวจตำแหน่ง)
+                </button>
+              )}
+            </div>
+
+            {/* GPS คลาดเคลื่อนได้หลายสิบเมตร บอกไว้ให้ผู้ดูแลตั้งรัศมีเผื่อ */}
+            <p className="mt-2 text-2xs text-muted">
+              ระบบเผื่อความคลาดเคลื่อนของ GPS ให้อีก 50 เมตรจากรัศมีที่ตั้งไว้
+              เพราะสัญญาณในอาคารมักเพี้ยนหลายสิบเมตร
+            </p>
+          </fieldset>
+
           {form.kind === 'vote' && (
             <div className="sm:col-span-2">
               <VoteOptions value={options} onChange={setOptions} />
@@ -247,20 +391,30 @@ function EventForm({ open, editing, onClose, onSaved }) {
             <label className="label" htmlFor="kind">
               ประเภท
             </label>
-            <select id="kind" className="field" value={form.kind} onChange={set('kind')}>
-              <option value="register">ลงทะเบียนเข้าร่วม</option>
-              <option value="vote">โหวต (ได้คะแนนทันที)</option>
-            </select>
+            <Select
+              id="kind"
+              options={[
+                { value: 'register', label: 'ลงทะเบียนเข้าร่วม' },
+                { value: 'vote', label: 'โหวต (ได้คะแนนทันที)' },
+              ]}
+              value={form.kind}
+              onChange={(value) => setForm((f) => ({ ...f, kind: value }))}
+            />
           </div>
           <div>
             <label className="label" htmlFor="status">
               สถานะ
             </label>
-            <select id="status" className="field" value={form.status} onChange={set('status')}>
-              <option value="open">เปิดรับ</option>
-              <option value="draft">ร่าง</option>
-              <option value="closed">ปิดแล้ว</option>
-            </select>
+            <Select
+              id="status"
+              options={[
+                { value: 'open', label: 'เปิดรับ' },
+                { value: 'draft', label: 'ร่าง' },
+                { value: 'closed', label: 'ปิดแล้ว' },
+              ]}
+              value={form.status}
+              onChange={(value) => setForm((f) => ({ ...f, status: value }))}
+            />
           </div>
 
           <div className="sm:col-span-2">
@@ -297,12 +451,23 @@ function CheckInBox({ event, onClose, onDone }) {
   // แล้วค่อยกดยืนยันอีกที กันกรณีพิมพ์รหัสผิดแล้วเผลอให้คะแนนคนอื่น
   const [walkIn, setWalkIn] = useState(null);
 
+  // คนที่ลงทะเบียนในแอปไปแล้วและได้คะแนนไปแล้ว ต้องเตือนไม่ให้สแกนซ้ำ
+  const [already, setAlready] = useState(null);
+
   async function checkIn(employeeCode, allowWalkIn) {
     try {
       const res = await api.adminCheckIn(event.id, employeeCode, allowWalkIn);
 
       if (res.ok === false && res.status === 'not-registered') {
         setWalkIn({ code: employeeCode, name: res.name });
+        setAlready(null);
+        setResult(null);
+        return;
+      }
+
+      if (res.ok === false && res.status === 'already-registered') {
+        setAlready({ name: res.name });
+        setWalkIn(null);
         setResult(null);
         return;
       }
@@ -312,6 +477,7 @@ function CheckInBox({ event, onClose, onDone }) {
         walkIn: res.walkIn,
       });
       setWalkIn(null);
+      setAlready(null);
       setCode('');
       onDone();
     } catch (err) {
@@ -342,9 +508,22 @@ function CheckInBox({ event, onClose, onDone }) {
           onChange={(e) => {
             setCode(e.target.value);
             setWalkIn(null);
+            setAlready(null);
           }}
           autoFocus
         />
+
+        {/* ลงทะเบียนในแอปไปแล้ว ไม่ต้องสแกนซ้ำ และระบบไม่จ่ายคะแนนให้อีกรอบ */}
+        {already && (
+          <div className="mt-3 rounded-[10px] bg-primary-wash px-3 py-3">
+            <p className="flex items-start gap-2 text-sm font-medium text-primary-dark">
+              <span className="mt-0.5 shrink-0">
+                <Icon.CheckCircle size={16} />
+              </span>
+              <span>{already.name} ลงทะเบียนในแอปแล้ว</span>
+            </p>
+          </div>
+        )}
 
         {walkIn && (
           <div className="mt-3 rounded-[10px] bg-gold-wash px-3 py-3">
@@ -379,11 +558,19 @@ function CheckInBox({ event, onClose, onDone }) {
 }
 
 export default function AdminEvents() {
+  // ฝ่ายธุรการ (ga) เปิดหน้านี้ได้เพื่อดูรายชื่อและความคืบหน้ารายแผนกของแต่ละกิจกรรม
+  // แต่สร้าง แก้ไข และเช็คอินไม่ได้ ซึ่งเซิร์ฟเวอร์กันไว้อีกชั้นแล้ว
+  const { user } = useAuth();
+  // พนักงานแผนกหลังบ้านจัดการหน้านี้ได้เท่าผู้ดูแลระบบ
+  // ที่กันไว้เฉพาะผู้ดูแลระบบตัวจริงคือกลุ่มเมนู "ตั้งค่าระบบ" เท่านั้น
+  const isAdmin = isBackOffice(user);
+
   const [events, setEvents] = useState(null);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [checkIn, setCheckIn] = useState(null);
   const [sheetFor, setSheetFor] = useState(null);
+  const [summaryFor, setSummaryFor] = useState(null);
 
   const load = useCallback(() => api.adminEvents().then(({ events }) => setEvents(events)), []);
 
@@ -393,17 +580,19 @@ export default function AdminEvents() {
 
   return (
     <AdminShell
-      title="จัดการกิจกรรม"
+      title={isAdmin ? 'จัดการกิจกรรม' : 'กิจกรรม'}
       actions={
-        <button
-          onClick={() => {
-            setEditing(null);
-            setFormOpen(true);
-          }}
-          className="btn-primary btn-sm"
-        >
-          <Icon.Plus size={16} /> สร้างกิจกรรม
-        </button>
+        isAdmin ? (
+          <button
+            onClick={() => {
+              setEditing(null);
+              setFormOpen(true);
+            }}
+            className="btn-primary btn-sm"
+          >
+            <Icon.Plus size={16} /> สร้างกิจกรรม
+          </button>
+        ) : null
       }
     >
       <section className="card overflow-hidden">
@@ -455,21 +644,28 @@ export default function AdminEvents() {
                     </td>
                     <td className="td">
                       <div className="flex gap-3">
+                        <button onClick={() => setSummaryFor(event.id)} className="text-primary">
+                          สรุปข้อมูล
+                        </button>
                         <button onClick={() => setSheetFor(event.id)} className="text-primary">
                           รายชื่อ
                         </button>
-                        <button onClick={() => setCheckIn(event)} className="text-primary">
-                          เช็คอิน
-                        </button>
-                        <button
-                          onClick={() => {
-                            setEditing(event);
-                            setFormOpen(true);
-                          }}
-                          className="text-slate"
-                        >
-                          แก้ไข
-                        </button>
+                        {isAdmin && (
+                          <>
+                            <button onClick={() => setCheckIn(event)} className="text-primary">
+                              เช็คอิน
+                            </button>
+                            <button
+                              onClick={() => {
+                                setEditing(event);
+                                setFormOpen(true);
+                              }}
+                              className="text-slate"
+                            >
+                              แก้ไข
+                            </button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -482,6 +678,7 @@ export default function AdminEvents() {
 
       <EventForm open={formOpen} editing={editing} onClose={() => setFormOpen(false)} onSaved={load} />
       {checkIn && <CheckInBox event={checkIn} onClose={() => setCheckIn(null)} onDone={load} />}
+      <EventSummary eventId={summaryFor} onClose={() => setSummaryFor(null)} />
       <RegistrationSheet eventId={sheetFor} onClose={() => setSheetFor(null)} />
     </AdminShell>
   );

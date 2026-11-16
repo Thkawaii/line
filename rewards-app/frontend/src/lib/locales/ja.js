@@ -69,7 +69,9 @@ export default {
   'events.schedule': 'スケジュール',
   'events.openDetails': '{{title}}の詳細を見る',
   'events.registerSuccess': '申し込みが完了しました',
-  'events.voteSuccess': '投票しました。{{points}}ポイント獲得',
+  'events.voteSuccess': '投票が完了しました',
+  'events.earnedPoints': '{{points}} ポイント獲得',
+  'events.earnedSpecial': '{{points}} 特別ポイント獲得',
 
   'favorite.add': 'お気に入りに追加',
   'favorite.remove': 'お気に入りから削除',
@@ -185,4 +187,78 @@ export default {
   'levelUp.rewardsWaiting': '新しい特典やご褒美が\nあなたを待っています',
   'levelUp.viewBenefits': '特典を見る',
   'levelUp.continue': '続ける',
+
+  /* 共通（追加） */
+  'common.search': '検索',
+  'common.closeWindow': 'ウィンドウを閉じる',
+  'common.pageOf': '{{pages}} ページ中 {{page}} ページ',
+  'common.submit': '送信',
+  'common.submitting': '送信中',
+  'common.optional': '任意',
+  'common.required': '必須項目をすべて入力してください',
+  'common.noData': 'この期間のデータはまだありません',
+
+  /* 登録とアンケート */
+  'surveys.title': '対応が必要な項目',
+  'surveys.navLabel': 'やること',
+  'surveys.empty': '現在、対応が必要な項目はありません',
+  'surveys.emptyHint': '新しい項目が追加されたらお知らせします',
+  'surveys.pending': '未対応',
+  'surveys.done': '完了',
+  'surveys.doneAt': '{{date}} に完了',
+  'surveys.open': '開く',
+  'surveys.register': '登録する',
+  'surveys.answer': 'アンケートに回答',
+  'surveys.giveFeedback': 'ご意見を送る',
+  'surveys.comment': '追加のご意見',
+  'surveys.commentPlaceholder': 'その他に伝えたいことがあればご記入ください',
+  'surveys.anonymousNote':
+    '回答は課ごとの集計にのみ使用されます。どの回答が誰のものかは管理者にも分かりません。',
+  'surveys.identifiedNote':
+    '管理者および総務担当者には、この回答とともにお名前が表示されます',
+  'surveys.success': '保存しました。ありがとうございました。',
+  'surveys.successPoints': '保存しました。{{points}} ポイントを獲得しました',
+  'surveys.already': 'この項目はすでに完了しています',
+  'surveys.closesOn': '{{date}} まで',
+  'surveys.earnPoints': '{{points}} ポイント獲得',
+
+  /* お知らせ */
+  'news.badge': 'お知らせ',
+  'news.counter': '{{total}} 件中 {{index}} 件目',
+  'news.publishedAt': '{{date}} 掲載',
+  'news.endOfContent': '— 以上 —',
+  'news.acknowledge': 'お知らせを確認しました',
+
+  /* 特別ポイント */
+  'points.special': '特別ポイント',
+  'points.specialBalance': 'あなたの特別ポイント',
+  'points.normal': '通常ポイント',
+  'rewards.useSpecial': '特別ポイントで交換',
+
+  /* 登録時の位置確認 */
+  'events.needsLocation': '会場での登録が必要',
+  'events.locationHint': 'この活動は位置を確認します。会場に到着してから登録してください。',
+  'events.checkingLocation': '位置を確認しています',
+  'events.locationDenied': 'ブラウザに位置情報の読み取りが許可されていません。',
+  'events.locationUnavailable': 'お使いの端末から位置を取得できませんでした。',
+  'events.locationInsecure':
+    '位置情報の利用には https 接続が必要です。管理者にお知らせください。',
+  'events.outsideVenue': '会場の範囲外です（約 {{distance}} 離れています）',
+
+  /* お知らせのリンクと添付 */
+  'news.openLink': 'リンクを開く',
+  'news.openFile': '添付ファイルを開く',
+
+  /* 位置情報の問題ダイアログ */
+  'events.tryAgain': 'もう一度試す',
+  'events.outsideVenueTitle': '会場の範囲外です',
+  'events.outsideVenueDetail': '会場から約 {{distance}} 離れています',
+  'events.outsideVenueHint': '会場までお越しいただき、もう一度登録してください',
+  'events.locationDeniedTitle': '位置情報の使用が許可されていません',
+  'events.locationDeniedHint':
+    'アドレスバー横の鍵アイコンから位置情報を許可して、もう一度お試しください',
+  'events.locationUnavailableTitle': '位置を取得できませんでした',
+  'events.locationUnavailableHint':
+    'GPS をオンにするか、屋外に出てからもう一度お試しください',
+  'events.locationInsecureTitle': 'https で配信されていません',
 };

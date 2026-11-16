@@ -75,8 +75,10 @@ export default {
   'events.details': 'รายละเอียด',
   'events.schedule': 'กำหนดการ',
   'events.openDetails': 'ดูรายละเอียด {{title}}',
-  'events.registerSuccess': 'ลงทะเบียนเรียบร้อย',
-  'events.voteSuccess': 'โหวตเรียบร้อย ได้รับ {{points}} คะแนน',
+  'events.registerSuccess': 'ลงทะเบียนเรียบร้อยแล้ว',
+  'events.voteSuccess': 'โหวตเรียบร้อยแล้ว',
+  'events.earnedPoints': 'ได้รับ {{points}} คะแนน',
+  'events.earnedSpecial': 'ได้รับ {{points}} คะแนนพิเศษ',
 
   /* รายการโปรด (ใช้ร่วมกับกิจกรรมและของรางวัล) */
   'favorite.add': 'เพิ่มเข้ารายการโปรด',
@@ -201,4 +203,78 @@ export default {
   'levelUp.rewardsWaiting': 'สิทธิประโยชน์และของรางวัลใหม่\nรอคุณอยู่',
   'levelUp.viewBenefits': 'ดูสิทธิประโยชน์',
   'levelUp.continue': 'เริ่มใช้งานต่อ',
+
+  /* ใช้ร่วมกันเพิ่มเติม */
+  'common.search': 'ค้นหา',
+  'common.closeWindow': 'ปิดหน้าต่าง',
+  'common.pageOf': 'หน้า {{page}} จาก {{pages}}',
+  'common.submit': 'ส่ง',
+  'common.submitting': 'กำลังส่ง',
+  'common.optional': 'ไม่บังคับ',
+  'common.required': 'กรุณากรอกข้อมูลให้ครบก่อนส่ง',
+  'common.noData': 'ยังไม่มีข้อมูลในช่วงนี้',
+
+  /* ลงทะเบียนและแบบสำรวจ */
+  'surveys.title': 'รายการที่ต้องทำ',
+  'surveys.navLabel': 'สิ่งที่ต้องทำ',
+  'surveys.empty': 'ตอนนี้ยังไม่มีรายการที่ต้องทำ',
+  'surveys.emptyHint': 'ถ้ามีเรื่องใหม่ให้ทำ จะแจ้งเตือนคุณทันที',
+  'surveys.pending': 'ยังไม่ได้ทำ',
+  'surveys.done': 'ทำแล้ว',
+  'surveys.doneAt': 'ทำเมื่อ {{date}}',
+  'surveys.open': 'เปิดทำรายการ',
+  'surveys.register': 'ลงทะเบียน',
+  'surveys.answer': 'ตอบแบบสำรวจ',
+  'surveys.giveFeedback': 'แสดงความคิดเห็น',
+  'surveys.comment': 'ความคิดเห็นเพิ่มเติม',
+  'surveys.commentPlaceholder': 'อยากบอกอะไรเพิ่มเติม เขียนไว้ตรงนี้ได้เลย',
+  'surveys.anonymousNote':
+    'คำตอบของคุณจะถูกนับรวมเป็นภาพรวมของแผนกเท่านั้น ผู้ดูแลระบบจะไม่เห็นว่าคำตอบไหนเป็นของใคร',
+  'surveys.identifiedNote':
+    'ผู้ดูแลระบบและฝ่ายธุรการจะเห็นชื่อของคุณพร้อมกับคำตอบนี้',
+  'surveys.success': 'บันทึกเรียบร้อย ขอบคุณมาก',
+  'surveys.successPoints': 'บันทึกเรียบร้อย ได้รับ {{points}} คะแนน',
+  'surveys.already': 'คุณทำรายการนี้ไปแล้ว',
+  'surveys.closesOn': 'ทำได้ถึง {{date}}',
+  'surveys.earnPoints': 'ทำแล้วได้ {{points}} คะแนน',
+
+  /* ประกาศข่าวสาร */
+  'news.badge': 'ประกาศข่าวสาร',
+  'news.counter': 'ฉบับที่ {{index}} จาก {{total}}',
+  'news.publishedAt': 'ประกาศเมื่อ {{date}}',
+  'news.endOfContent': '— จบเนื้อหา —',
+  'news.acknowledge': 'รับทราบข้อมูลข่าวสาร',
+
+  /* คะแนนพิเศษ */
+  'points.special': 'คะแนนพิเศษ',
+  'points.specialBalance': 'คะแนนพิเศษของคุณ',
+  'points.normal': 'คะแนนปกติ',
+  'rewards.useSpecial': 'แลกด้วยคะแนนพิเศษ',
+
+  /* ตรวจตำแหน่งตอนลงทะเบียน */
+  'events.needsLocation': 'ต้องลงทะเบียนที่หน้างาน',
+  'events.locationHint': 'กิจกรรมนี้ตรวจตำแหน่ง กรุณากดลงทะเบียนเมื่ออยู่ในพื้นที่จัดงาน',
+  'events.checkingLocation': 'กำลังตรวจสอบตำแหน่ง',
+  'events.locationDenied': 'เบราว์เซอร์ยังไม่ได้รับอนุญาตให้อ่านตำแหน่งของคุณ',
+  'events.locationUnavailable': 'ระบบอ่านตำแหน่งจากเครื่องของคุณไม่สำเร็จ',
+  'events.locationInsecure':
+    'ระบบยังเปิดผ่าน https ไม่ได้ จึงใช้ตำแหน่งไม่ได้ กรุณาแจ้งผู้ดูแลระบบ',
+  'events.outsideVenue': 'คุณไม่ได้อยู่ในพื้นที่จัดงาน (ห่างประมาณ {{distance}})',
+
+  /* ลิงก์และไฟล์แนบของประกาศ */
+  'news.openLink': 'เปิดลิงก์',
+  'news.openFile': 'เปิดไฟล์แนบ',
+
+  /* หน้าต่างแจ้งปัญหาตำแหน่ง */
+  'events.tryAgain': 'ลองอีกครั้ง',
+  'events.outsideVenueTitle': 'คุณไม่ได้อยู่ในพื้นที่จัดงาน',
+  'events.outsideVenueDetail': 'ตอนนี้คุณอยู่ห่างจากจุดจัดงานประมาณ {{distance}}',
+  'events.outsideVenueHint': 'กรุณาเข้ามาในบริเวณงานก่อน แล้วกดลงทะเบียนอีกครั้ง',
+  'events.locationDeniedTitle': 'ยังไม่ได้อนุญาตให้ใช้ตำแหน่ง',
+  'events.locationDeniedHint':
+    'แตะไอคอนรูปแม่กุญแจข้างแถบที่อยู่เว็บ แล้วเปิดสิทธิ์ตำแหน่ง จากนั้นลองใหม่',
+  'events.locationUnavailableTitle': 'หาตำแหน่งของคุณไม่ได้',
+  'events.locationUnavailableHint':
+    'เปิด GPS ของเครื่อง หรือเดินออกไปที่โล่งสักครู่ แล้วลองใหม่',
+  'events.locationInsecureTitle': 'ระบบยังเปิดผ่าน https ไม่ได้',
 };

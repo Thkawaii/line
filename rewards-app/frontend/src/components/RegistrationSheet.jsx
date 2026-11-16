@@ -66,7 +66,7 @@ export default function RegistrationSheet({ eventId, onClose }) {
             <div>
               <h2 className="text-xl font-bold text-ink">รายชื่อผู้ลงทะเบียน</h2>
               <p className="mt-1 text-sm text-muted">
-                ทั้งหมด {num(data.total)} คน · เช็คอินแล้ว {num(data.attended)} คน
+                ทั้งหมด {num(data.total)} คน · ได้รับคะแนนแล้ว {num(data.attended)} คน
                 {event.capacity > 0 && ` · รับได้ ${num(event.capacity)} คน`}
               </p>
             </div>
@@ -143,10 +143,12 @@ export default function RegistrationSheet({ eventId, onClose }) {
                     <td className="td">{row.branch || '-'}</td>
                     {isVote && <td className="td">{row.option_label || '-'}</td>}
                     <td className="td">
+                      {/* ลงทะเบียนผ่านแอปคือมาถึงงานแล้วและได้คะแนนไปแล้ว
+                          แถวที่ยังเป็น registered มีแต่ข้อมูลเก่าก่อนเปลี่ยนกติกา */}
                       {row.status === 'attended' ? (
-                        <Badge className="bg-success-wash text-success">เช็คอินแล้ว</Badge>
+                        <Badge className="bg-success-wash text-success">ลงทะเบียนแล้ว</Badge>
                       ) : (
-                        <Badge className="bg-line text-slate">รอเช็คอิน</Badge>
+                        <Badge className="bg-line text-slate">ยังไม่ได้รับคะแนน</Badge>
                       )}
                       {row.walk_in && (
                         <Badge className="ml-1.5 bg-gold-wash text-gold-ink">หน้างาน</Badge>

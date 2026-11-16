@@ -197,8 +197,11 @@ func checkInScanned(w http.ResponseWriter, actorID, eventID, userID int64, user 
 	defer tx.Rollback()
 
 	var title string
-	var points int
-	err = tx.QueryRow(`SELECT title, points FROM events WHERE id = $1`, eventID).Scan(&title, &points)
+	var points, specialPoints int
+	var specialExpire sql.NullTime
+	err = tx.QueryRow(
+		`SELECT title, points, special_points, special_points_expire_at FROM events WHERE id = $1`,
+		eventID).Scan(&title, &points, &specialPoints, &specialExpire)
 	if errors.Is(err, sql.ErrNoRows) {
 		web.Error(w, http.StatusNotFound, "ไม่พบกิจกรรมนี้")
 		return
@@ -263,6 +266,12 @@ func checkInScanned(w http.ResponseWriter, actorID, eventID, userID int64, user 
 			web.Fail(w, err)
 			return
 		}
+	}
+
+	// คะแนนพิเศษจ่ายแยก และจ่ายแม้กิจกรรมจะไม่ได้ตั้งคะแนนปกติไว้
+	if err := awardSpecialPoints(tx, userID, specialPoints, "เข้าร่วม "+title, specialExpire); err != nil {
+		web.Fail(w, err)
+		return
 	}
 
 	if err := tx.Commit(); err != nil {

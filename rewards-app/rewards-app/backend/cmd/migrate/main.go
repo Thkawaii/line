@@ -38,11 +38,10 @@ func main() {
 		fail(err)
 	}
 
-	schema, err := os.ReadFile(config.SchemaPath())
-	if err != nil {
+	if _, err := store.Exec(config.Schema()); err != nil {
 		fail(err)
 	}
-	if _, err := store.Exec(string(schema)); err != nil {
+	if _, err := config.RunMigrations(); err != nil {
 		fail(err)
 	}
 	fmt.Println("สร้างตารางเรียบร้อย (ข้อมูลเดิมถูกล้างทั้งหมด)")

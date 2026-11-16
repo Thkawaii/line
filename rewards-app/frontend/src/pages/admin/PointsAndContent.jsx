@@ -1,18 +1,48 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import AdminShell from '../../components/AdminShell';
-import { Badge, Modal, Notice, Pagination, SearchInput, Spinner, useToast } from '../../components/ui';
+import { Select } from '../../components/ComboBox';
+import {
+  Badge,
+  ConfirmDialog,
+  Modal,
+  Notice,
+  Pagination,
+  SearchInput,
+  Spinner,
+  useToast,
+} from '../../components/ui';
 import { Icon } from '../../components/icons';
 import { dateTime, num, signedPoints, thaiDate } from '../../lib/format';
+import { canAdjustPoints } from '../../lib/org';
+import { SpecialPointIcon } from '../../components/SpecialPoints';
+import { useAuth } from '../../context/AuthContext';
 
 export function AdminPoints() {
   const toast = useToast();
+  const { user } = useAuth();
+
+  /*
+   * สิทธิ์ปรับคะแนนผูกกับตำแหน่งงาน ไม่ใช่แค่การเป็นผู้ดูแลระบบ
+   * role admin ทำได้เสมอ คนอื่นต้องมีตำแหน่งตั้งแต่ Chief Engineer ขึ้นไป
+   *
+   * ซ่อนปุ่มที่หน้าจอเป็นแค่ความสะดวก การกันจริงอยู่ที่เซิร์ฟเวอร์
+   * (CanAdjustPoints ใน backend/controllers/positions.go)
+   */
+  const mayAdjust = canAdjustPoints(user);
+
   const [q, setQ] = useState('');
   const [kind, setKind] = useState('');
   const [page, setPage] = useState(1);
   const [data, setData] = useState(null);
   const [adjustOpen, setAdjustOpen] = useState(false);
-  const [form, setForm] = useState({ employee: '', points: '', title: '' });
+  const [form, setForm] = useState({
+    employee: '',
+    points: '',
+    title: '',
+    pointKind: 'point',
+    expireAt: '',
+  });
   const [error, setError] = useState('');
   const [reset, setReset] = useState(null);
 
@@ -41,33 +71,43 @@ export function AdminPoints() {
         userId: target.id,
         points: Number(form.points),
         title: form.title || 'ปรับคะแนนโดยผู้ดูแลระบบ',
+        pointKind: form.pointKind,
+        // ส่งวันหมดอายุเฉพาะตอนเพิ่มคะแนนพิเศษ การหักคืนไม่ควรไปเลื่อนวันหมดอายุ
+        expireAt: form.pointKind === 'special' ? form.expireAt : '',
       });
       toast(`ปรับคะแนนให้ ${target.display_name} แล้ว`, 'primary');
       setAdjustOpen(false);
-      setForm({ employee: '', points: '', title: '' });
+      setForm({ employee: '', points: '', title: '', pointKind: 'point', expireAt: '' });
       load();
     } catch (err) {
       setError(err.message);
     }
   }
 
-  // ตัดยอดคะแนนประจำปีด้วยมือ ปกติระบบทำเองเมื่อถึงกำหนด
-  async function runAnnualReset() {
-    if (
-      !window.confirm(
-        'ตัดยอดคะแนนประจำปีตอนนี้เลยใช่ไหม\n\n' +
-          'คะแนนของพนักงานทุกคนจะถูกตัดและเริ่มรอบใหม่ ' +
-          'คนที่ได้รับคะแนนไม่ถึงเกณฑ์จะถูกลดระดับ ย้อนกลับไม่ได้'
-      )
-    )
-      return;
+  /*
+    ตัดยอดคะแนนประจำปีด้วยมือ
 
-    const result = await api.adminAnnualReset();
-    toast(
-      `ตัดยอดเรียบร้อย ${num(result.total)} บัญชี · คงระดับ ${num(result.kept)} · ลดระดับ ${num(result.demoted)}`,
-      'primary'
-    );
-    load();
+    ปกติไม่ต้องกด ระบบตรวจทุกชั่วโมงและทำให้เองเมื่อถึงวันที่ตั้งไว้
+    ปุ่มนี้มีไว้เผื่อต้องการตัดก่อนกำหนด หรือกำหนดผ่านไปแล้วตอนเซิร์ฟเวอร์ปิดอยู่
+  */
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [resetting, setResetting] = useState(false);
+
+  async function runAnnualReset() {
+    setResetting(true);
+    try {
+      const result = await api.adminAnnualReset();
+      toast(
+        `ตัดยอดเรียบร้อย ${num(result.total)} บัญชี · คงระดับ ${num(result.kept)} · ลดระดับ ${num(result.demoted)}`,
+        'primary'
+      );
+      setConfirmReset(false);
+      load();
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      setResetting(false);
+    }
   }
 
   return (
@@ -75,12 +115,19 @@ export function AdminPoints() {
       title="จัดการคะแนน"
       actions={
         <div className="flex gap-2">
-          <button onClick={runAnnualReset} className="btn-ghost btn-sm">
-            <Icon.Refresh size={16} /> ตัดยอดคะแนนประจำปี
-          </button>
-          <button onClick={() => setAdjustOpen(true)} className="btn-primary btn-sm">
-            <Icon.Plus size={16} /> ปรับคะแนน
-          </button>
+          {/* ตัดยอดประจำปีย้อนกลับไม่ได้และกระทบทุกคนในระบบ
+              จึงใช้สิทธิ์ชุดเดียวกับการปรับคะแนน คือต้องอยู่ในแผนกหลังบ้าน
+              และมีตำแหน่งตั้งแต่ Chief Officer ขึ้นไป */}
+          {mayAdjust && (
+            <button onClick={() => setConfirmReset(true)} className="btn-ghost btn-sm">
+              <Icon.Refresh size={16} /> ตัดยอดคะแนนประจำปี
+            </button>
+          )}
+          {mayAdjust && (
+            <button onClick={() => setAdjustOpen(true)} className="btn-primary btn-sm">
+              <Icon.Plus size={16} /> ปรับคะแนน
+            </button>
+          )}
         </div>
       }
     >
@@ -98,8 +145,8 @@ export function AdminPoints() {
               เสี่ยงถูกลดระดับ : <b>{num(reset.atRisk)}</b> คน
             </p>
             <p className="w-full text-2xs text-muted">
-              ระบบตัดยอดให้เองเมื่อถึงกำหนด ไม่ต้องกดเอง · Silver ต้องได้รับคะแนนอย่างน้อย 500
-              และ Elite อย่างน้อย 1,000 ในรอบปี จึงจะคงระดับไว้ได้
+              ระบบรีเซ็ตคะแนนอัตโนมัติเมื่อสิ้นปี โดยระดับ Silver ต้องได้รับคะแนนอย่างน้อย 500 คะแนน
+              และระดับ Elite อย่างน้อย 1,000 คะแนนภายในรอบปี เพื่อรักษาระดับสมาชิก
             </p>
           </section>
         )}
@@ -116,19 +163,22 @@ export function AdminPoints() {
           </div>
           <label className="flex items-center gap-2 text-sm text-slate">
             ประเภท
-            <select
-              value={kind}
-              onChange={(e) => {
-                setPage(1);
-                setKind(e.target.value);
-              }}
-              className="field h-9 w-40 py-0"
-            >
-              <option value="">ทั้งหมด</option>
-              <option value="earn">ได้รับคะแนน</option>
-              <option value="redeem">แลกของรางวัล</option>
-              <option value="adjust">ปรับโดยแอดมิน</option>
-            </select>
+            <div className="w-40">
+              <Select
+                options={[
+                  { value: '', label: 'ทั้งหมด' },
+                  { value: 'earn', label: 'ได้รับคะแนน' },
+                  { value: 'redeem', label: 'แลกของรางวัล' },
+                  { value: 'adjust', label: 'ปรับโดยแอดมิน' },
+                ]}
+                value={kind}
+                onChange={(value) => {
+                  setPage(1);
+                  setKind(value);
+                }}
+                placeholder="ทั้งหมด"
+              />
+            </div>
           </label>
         </div>
 
@@ -192,7 +242,6 @@ export function AdminPoints() {
       <Modal open={adjustOpen} onClose={() => setAdjustOpen(false)} size="sm">
         <form onSubmit={adjust} className="p-6">
           <h2 className="text-lg font-bold text-ink">ปรับคะแนนพนักงาน</h2>
-          <p className="mt-1 text-sm text-muted">ใส่จำนวนติดลบเพื่อหักคะแนนคืน</p>
 
           {error && (
             <div className="mt-3">
@@ -211,6 +260,44 @@ export function AdminPoints() {
             required
           />
 
+          <label className="label mt-3" htmlFor="adjustKind">
+            ปรับคะแนนแบบไหน
+          </label>
+          <Select
+            id="adjustKind"
+            options={[
+              { value: 'point', label: 'คะแนนปกติ' },
+              { value: 'special', label: 'คะแนนพิเศษ' },
+            ]}
+            value={form.pointKind}
+            onChange={(value) => setForm({ ...form, pointKind: value })}
+          />
+          {form.pointKind === 'special' && (
+            <>
+              <p className="mt-1 flex items-center gap-1.5 text-2xs text-muted">
+                <SpecialPointIcon size={14} />
+                คะแนนพิเศษไม่นำไปคิดระดับสมาชิก และไม่ถูกตัดยอดพร้อมคะแนนปกติตอนสิ้นปี
+              </p>
+
+              <label className="label mt-3" htmlFor="adjustExpire">
+                คะแนนพิเศษหมดอายุวันที่
+              </label>
+              <input
+                id="adjustExpire"
+                type="date"
+                className="field"
+                value={form.expireAt}
+                onChange={(e) => setForm({ ...form, expireAt: e.target.value })}
+              />
+              <p className="mt-1 text-2xs text-muted">
+                เว้นว่างไว้ = ไม่มีวันหมดอายุ · พ้นวันนี้แล้วคะแนนพิเศษของพนักงานคนนี้จะถูกตัดเหลือ 0
+                <br />
+                ถ้าเขามีวันหมดอายุเดิมอยู่แล้ว ระบบจะเก็บวันที่ไกลกว่าไว้
+                เพื่อไม่ให้คะแนนก้อนใหม่หายไปพร้อมก้อนเก่า
+              </p>
+            </>
+          )}
+
           <label className="label mt-3" htmlFor="adjustPoints">
             จำนวนคะแนน
           </label>
@@ -222,6 +309,9 @@ export function AdminPoints() {
             onChange={(e) => setForm({ ...form, points: e.target.value })}
             required
           />
+          {/* วางไว้ติดช่องที่กำลังกรอก ไม่ใช่ใต้หัวข้อหน้าต่าง
+              คำแนะนำการกรอกอ่านตอนกรอกถึงจะมีประโยชน์ */}
+          <p className="mt-1 text-2xs text-muted">ใส่จำนวนติดลบเพื่อหักคะแนน</p>
 
           <label className="label mt-3" htmlFor="reason">
             เหตุผล
@@ -231,7 +321,6 @@ export function AdminPoints() {
             className="field"
             value={form.title}
             onChange={(e) => setForm({ ...form, title: e.target.value })}
-            placeholder="เช่น ชดเชยกิจกรรมวันที่ 15"
           />
 
           <button type="submit" className="btn-primary mt-5 w-full">
@@ -239,6 +328,15 @@ export function AdminPoints() {
           </button>
         </form>
       </Modal>
+      <ConfirmDialog
+        open={confirmReset}
+        tone="danger"
+        busy={resetting}
+        title="ตัดยอดคะแนนประจำปีตอนนี้เลยใช่ไหม"
+        confirmLabel="ตัดยอดเลย"
+        onConfirm={runAnnualReset}
+        onCancel={() => setConfirmReset(false)}
+      />
     </AdminShell>
   );
 }
@@ -439,31 +537,28 @@ export function AdminNotifications() {
               <label className="label" htmlFor="notifCategory">
                 หมวด
               </label>
-              <select
+              <Select
                 id="notifCategory"
-                className="field"
+                options={[
+                  { value: 'announce', label: 'ประกาศ' },
+                  { value: 'event', label: 'กิจกรรม' },
+                  { value: 'reward', label: 'ของรางวัล' },
+                  { value: 'point', label: 'คะแนน' },
+                ]}
                 value={form.category}
-                onChange={(e) => setForm({ ...form, category: e.target.value })}
-              >
-                <option value="announce">ประกาศ</option>
-                <option value="event">กิจกรรม</option>
-                <option value="reward">ของรางวัล</option>
-                <option value="point">คะแนน</option>
-              </select>
+                onChange={(value) => setForm({ ...form, category: value })}
+              />
             </div>
             <div>
               <label className="label" htmlFor="notifChannel">
                 Channel
               </label>
-              <select
+              <Select
                 id="notifChannel"
-                className="field"
+                options={['in-app', 'email']}
                 value={form.channel}
-                onChange={(e) => setForm({ ...form, channel: e.target.value })}
-              >
-                <option value="in-app">In-App</option>
-                <option value="email">Email</option>
-              </select>
+                onChange={(value) => setForm({ ...form, channel: value })}
+              />
             </div>
           </div>
 

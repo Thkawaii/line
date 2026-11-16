@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -55,8 +56,15 @@ func Home(w http.ResponseWriter, r *http.Request) {
 	// ตรวจระดับให้ตรงกับคะแนนก่อนแสดงผล เผื่อคะแนนถูกแก้จากทางอื่น
 	SyncTier(claims.ID)
 
+	// ตัดยอดคะแนนพิเศษที่หมดอายุก่อนแสดงผล ยอดที่เห็นจะได้ตรงกับความจริงทันที
+	// ไม่ต้องรอรอบของตัวตั้งเวลา
+	if _, err := ExpireSpecialPoints(claims.ID); err != nil {
+		log.Printf("ตัดยอดคะแนนพิเศษที่หมดอายุไม่สำเร็จ: %v", err)
+	}
+
 	user, err := store.QueryOne(`
-		SELECT u.display_name, u.tier, u.points, u.points_expire_at, t.color AS tier_color
+		SELECT u.display_name, u.tier, u.points, u.special_points, u.points_expire_at,
+		       u.special_points_expire_at, t.color AS tier_color
 		FROM users u LEFT JOIN tiers t ON t.key = u.tier WHERE u.id = $1`, claims.ID)
 	if err != nil {
 		web.Fail(w, err)
@@ -66,6 +74,7 @@ func Home(w http.ResponseWriter, r *http.Request) {
 		web.Error(w, http.StatusNotFound, "ไม่พบบัญชีนี้")
 		return
 	}
+	withExpiry(user)
 
 	lang := requestLanguage(r)
 
@@ -78,7 +87,7 @@ func Home(w http.ResponseWriter, r *http.Request) {
 
 	rewards, err := store.Query(`
 		SELECT r.id, r.name, r.image_url, r.points, r.old_points, r.stock, r.translations,
-		       r.min_tier,
+		       r.min_tier, r.point_kind,
 		       (COALESCE(rt.min_points,0) > COALESCE(ut.min_points,0)) AS locked,
 		       CASE WHEN r.ends_at IS NOT NULL THEN (r.ends_at - current_date)::int END AS days_left
 		FROM rewards r
@@ -96,7 +105,7 @@ func Home(w http.ResponseWriter, r *http.Request) {
 
 	events, err := store.Query(`
 		SELECT id, title, image_url, event_date, end_date, start_time, end_time, location,
-		       points, kind, translations
+		       points, special_points, special_points_expire_at, kind, translations
 		FROM events WHERE status = 'open' ORDER BY event_date LIMIT 3`)
 	if err != nil {
 		web.Fail(w, err)
@@ -125,17 +134,22 @@ func Home(w http.ResponseWriter, r *http.Request) {
 func Points(w http.ResponseWriter, r *http.Request) {
 	claims := middleware.CurrentUser(r)
 
+	if _, err := ExpireSpecialPoints(claims.ID); err != nil {
+		log.Printf("ตัดยอดคะแนนพิเศษที่หมดอายุไม่สำเร็จ: %v", err)
+	}
+
 	user, err := store.QueryOne(`
-		SELECT u.display_name, u.employee_code, u.tier, u.points, u.points_expire_at,
-		       t.color AS tier_color
+		SELECT u.display_name, u.employee_code, u.tier, u.points, u.special_points,
+		       u.points_expire_at, u.special_points_expire_at, t.color AS tier_color
 		FROM users u LEFT JOIN tiers t ON t.key = u.tier WHERE u.id = $1`, claims.ID)
 	if err != nil {
 		web.Fail(w, err)
 		return
 	}
+	withExpiry(user)
 
 	recent, err := store.Query(`
-		SELECT id, kind, source, title, points, created_at FROM point_transactions
+		SELECT id, kind, source, title, points, point_kind, created_at FROM point_transactions
 		WHERE user_id = $1 ORDER BY created_at DESC LIMIT 3`, claims.ID)
 	if err != nil {
 		web.Fail(w, err)
@@ -151,7 +165,8 @@ func Points(w http.ResponseWriter, r *http.Request) {
 
 	expiring, err := store.Count(`
 		SELECT COALESCE(sum(points),0)::int FROM point_transactions
-		WHERE user_id = $1 AND kind = 'earn' AND created_at < now() - interval '11 months'`, claims.ID)
+		WHERE user_id = $1 AND kind = 'earn' AND point_kind = 'point'
+		  AND created_at < now() - interval '11 months'`, claims.ID)
 	if err != nil {
 		web.Fail(w, err)
 		return
@@ -179,7 +194,8 @@ func PointsHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := store.Query(`
-		SELECT t.id, t.kind, t.source, t.title, t.points, t.created_at, r.status AS redemption_status
+		SELECT t.id, t.kind, t.source, t.title, t.points, t.point_kind, t.created_at,
+		       r.status AS redemption_status
 		FROM point_transactions t
 		LEFT JOIN redemptions r ON r.ref_code = t.ref_code
 		WHERE t.user_id = $1 `+filter+`
@@ -216,7 +232,9 @@ func Events(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := store.Query(`
 		SELECT e.id, e.title, e.description, e.agenda, e.image_url, e.location, e.event_date,
-		       e.end_date, e.start_time, e.end_time, e.points, e.kind, e.capacity,
+		       e.end_date, e.start_time, e.end_time, e.points, e.special_points,
+		       e.special_points_expire_at, e.kind, e.capacity,
+		       (e.venue_lat IS NOT NULL AND e.venue_lng IS NOT NULL) AS needs_location,
 		       (r.id IS NOT NULL) AS joined,
 		       r.option_id AS chosen_option_id,
 		       (f.user_id IS NOT NULL) AS favorite,
@@ -252,7 +270,9 @@ func RegisterEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		OptionID int64 `json:"optionId"`
+		OptionID int64    `json:"optionId"`
+		Lat      *float64 `json:"lat"`
+		Lng      *float64 `json:"lng"`
 	}
 	_ = web.Decode(r, &body) // กิจกรรมแบบลงทะเบียนไม่ต้องส่งอะไรมา
 
@@ -265,10 +285,15 @@ func RegisterEvent(w http.ResponseWriter, r *http.Request) {
 
 	// ล็อกแถวกิจกรรมไว้ กันคนกดพร้อมกันจนเกินจำนวนที่รับ
 	var title, kind string
-	var points, capacity int
+	var points, capacity, specialPoints, venueRadius int
+	var specialExpire sql.NullTime
+	var venueLat, venueLng sql.NullFloat64
 	err = tx.QueryRow(
-		`SELECT title, kind, points, capacity FROM events WHERE id = $1 AND status = 'open' FOR UPDATE`,
-		eventID).Scan(&title, &kind, &points, &capacity)
+		`SELECT title, kind, points, capacity, special_points, special_points_expire_at,
+		        venue_lat, venue_lng, venue_radius
+		 FROM events WHERE id = $1 AND status = 'open' FOR UPDATE`,
+		eventID).Scan(&title, &kind, &points, &capacity, &specialPoints, &specialExpire,
+		&venueLat, &venueLng, &venueRadius)
 	if errors.Is(err, sql.ErrNoRows) {
 		web.Error(w, http.StatusNotFound, "ไม่พบกิจกรรมนี้")
 		return
@@ -276,6 +301,34 @@ func RegisterEvent(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		web.Fail(w, err)
 		return
+	}
+
+	/*
+		ตรวจว่าอยู่ในพื้นที่จัดงานหรือยัง
+
+		กิจกรรมที่ไม่ได้ตั้งพิกัดไว้จะข้ามการตรวจทั้งหมด ลงทะเบียนจากที่ไหนก็ได้
+		กิจกรรมเก่าที่มีอยู่แล้วจึงทำงานเหมือนเดิมโดยไม่ต้องแก้อะไร
+
+		ส่งระยะห่างกลับไปด้วยเมื่อไม่ผ่าน หน้าเว็บจะได้บอกผู้ใช้ได้ว่าห่างแค่ไหน
+		ซึ่งช่วยให้เขารู้ว่าควรเดินเข้าไปใกล้อีกหน่อย หรือมาผิดที่ไปเลย
+	*/
+	if venueLat.Valid && venueLng.Valid {
+		if body.Lat == nil || body.Lng == nil {
+			web.Error(w, http.StatusBadRequest,
+				"กิจกรรมนี้ต้องลงทะเบียนที่หน้างาน กรุณาอนุญาตให้ใช้ตำแหน่งของคุณ")
+			return
+		}
+
+		distance := DistanceMeters(venueLat.Float64, venueLng.Float64, *body.Lat, *body.Lng)
+		if distance > float64(venueRadius)+gpsTolerance {
+			web.JSON(w, http.StatusForbidden, web.Map{
+				"error":    "คุณไม่ได้อยู่ในพื้นที่จัดงาน",
+				"code":     "outside_venue",
+				"distance": int(distance),
+				"radius":   venueRadius,
+			})
+			return
+		}
 	}
 
 	var exists int
@@ -320,25 +373,54 @@ func RegisterEvent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if _, err := tx.Exec(
-		`INSERT INTO event_registrations (event_id, user_id, option_id) VALUES ($1,$2,$3)`,
-		eventID, claims.ID, optionID); err != nil {
+	/*
+		กิจกรรมที่ตั้งพื้นที่จัดงานไว้ ให้ถือว่าลงทะเบียนคือการมาถึงงานแล้ว
+
+		เพราะระบบเพิ่งยืนยันไปว่าเครื่องของเขาอยู่ในรัศมีงานจริง
+		จึงบันทึกเป็น attended และให้คะแนนทันที ไม่ต้องให้แอดมินมาสแกนซ้ำอีกรอบ
+		นี่คือจุดประสงค์ของการตรวจตำแหน่ง: ลงทะเบียนหน้างานแล้วได้คะแนนเลย
+	*/
+	// ลงทะเบียนผ่านแอปคือการมาถึงงานแล้วเสมอ จึงบันทึกเป็น attended ทันที
+	// ถ้ากิจกรรมตั้งพื้นที่จัดงานไว้ โค้ดด้านบนยืนยันตำแหน่งไปเรียบร้อยแล้ว
+	atVenue := venueLat.Valid && venueLng.Valid
+	status := "attended"
+
+	if _, err := tx.Exec(`
+		INSERT INTO event_registrations (event_id, user_id, option_id, status, checked_in_at, lat, lng)
+		VALUES ($1, $2, $3, $4::varchar,
+		        CASE WHEN $4::varchar = 'attended' THEN now() END, $5, $6)`,
+		eventID, claims.ID, optionID, status, body.Lat, body.Lng); err != nil {
 		web.Fail(w, err)
 		return
 	}
 
-	// กิจกรรมแบบโหวตให้คะแนนทันที ส่วนกิจกรรมทั่วไปรอเช็คอินหน้างาน
+	/*
+		ลงทะเบียนผ่านแอปแล้วได้คะแนนทันทีเสมอ
+
+		เดิมกิจกรรมทั่วไปต้องรอให้แอดมินสแกนเช็คอินหน้างานก่อนจึงได้คะแนน
+		ซึ่งทำให้พนักงานลงทะเบียนแล้วเห็นสถานะ "รอเช็คอิน" ค้างอยู่
+		และต้องต่อแถวให้สแกนอีกรอบทั้งที่มาถึงงานแล้ว
+
+		ตอนนี้การลงทะเบียนคือการยืนยันว่ามาถึงงานแล้ว จึงจ่ายคะแนนเลย
+		กิจกรรมที่ตั้งพื้นที่จัดงานไว้ ระบบตรวจตำแหน่งให้ก่อนแล้วด้านบน
+		ส่วนการสแกนเช็คอินหน้างานเหลือไว้ใช้เฉพาะกรณีฉุกเฉิน
+		เช่นมือถือพนักงานแบตหมด หรือหาสัญญาณ GPS ไม่ได้
+	*/
 	awarded := 0
-	if kind == "vote" && points > 0 {
+	if points > 0 {
 		var tierUp string
 		awarded, tierUp, err = awardPoints(tx, claims.ID, points)
 		if err != nil {
 			web.Fail(w, err)
 			return
 		}
+		source := "vote"
+		if kind != "vote" {
+			source = "event"
+		}
 		if _, err := tx.Exec(`
 			INSERT INTO point_transactions (user_id, kind, source, title, points)
-			VALUES ($1,'earn','vote',$2,$3)`, claims.ID, title, awarded); err != nil {
+			VALUES ($1,'earn',$4,$2,$3)`, claims.ID, title, awarded, source); err != nil {
 			web.Fail(w, err)
 			return
 		}
@@ -356,12 +438,23 @@ func RegisterEvent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// คะแนนพิเศษจ่ายพร้อมกับคะแนนปกติเสมอ
+	if err := awardSpecialPoints(tx, claims.ID, specialPoints, title, specialExpire); err != nil {
+		web.Fail(w, err)
+		return
+	}
+
 	if err := tx.Commit(); err != nil {
 		web.Fail(w, err)
 		return
 	}
 
-	web.JSON(w, http.StatusOK, web.Map{"ok": true, "kind": kind, "points": awarded})
+	web.JSON(w, http.StatusOK, web.Map{
+		"ok": true, "kind": kind, "points": awarded,
+		// ส่งคะแนนพิเศษกลับไปด้วย หน้าเว็บจะได้แสดงทั้งสองกระเป๋าในหน้าต่างยืนยัน
+		"specialPoints": specialPoints,
+		"atVenue":       atVenue,
+	})
 }
 
 /* ---------- ของรางวัล ---------- */
@@ -376,7 +469,9 @@ func Rewards(w http.ResponseWriter, r *http.Request) {
 		args = append(args, "%"+q+"%")
 		where = append(where, fmt.Sprintf(`r.name ILIKE $%d`, len(args)))
 	}
-	if category := web.Param(r, "category", ""); category != "" && category != "ทั้งหมด" {
+	// ค่าว่างคือไม่กรองหมวด หน้าเว็บส่งค่าว่างมาเมื่อผู้ใช้เลือก "ทั้งหมด"
+	// ไม่เทียบกับคำว่า "ทั้งหมด" เพราะหน้าเว็บมีสามภาษา คำนั้นจึงไม่คงที่
+	if category := web.Param(r, "category", ""); category != "" {
 		args = append(args, category)
 		where = append(where, fmt.Sprintf(`r.category = $%d`, len(args)))
 	}
@@ -388,7 +483,7 @@ func Rewards(w http.ResponseWriter, r *http.Request) {
 
 	rewards, err := store.Query(`
 		SELECT r.id, r.name, r.description, r.how_to, r.conditions, r.image_url, r.category,
-		       r.points, r.old_points, r.stock, r.translations, r.min_tier,
+		       r.points, r.old_points, r.stock, r.translations, r.min_tier, r.point_kind,
 		       r.starts_at, r.ends_at,
 		       (f.user_id IS NOT NULL) AS favorite,
 		       -- ระดับต่ำกว่าเกณฑ์ยังเห็นของรางวัลได้ แต่กดแลกไม่ได้
@@ -421,13 +516,23 @@ func Rewards(w http.ResponseWriter, r *http.Request) {
 		categories = append(categories, name)
 	}
 
-	points, err := store.Count(`SELECT points FROM users WHERE id = $1`, claims.ID)
+	if _, err := ExpireSpecialPoints(claims.ID); err != nil {
+		log.Printf("ตัดยอดคะแนนพิเศษที่หมดอายุไม่สำเร็จ: %v", err)
+	}
+
+	// ส่งยอดทั้งสองกระเป๋ามา หน้าเว็บจะได้บอกได้ว่าของรางวัลชิ้นไหนแลกไหว
+	wallet, err := store.QueryOne(
+		`SELECT points, special_points FROM users WHERE id = $1`, claims.ID)
 	if err != nil {
 		web.Fail(w, err)
 		return
 	}
 
-	web.JSON(w, http.StatusOK, web.Map{"rewards": rewards, "categories": categories, "points": points})
+	web.JSON(w, http.StatusOK, web.Map{
+		"rewards": rewards, "categories": categories,
+		"points":        wallet["points"],
+		"specialPoints": wallet["special_points"],
+	})
 }
 
 func RedeemReward(w http.ResponseWriter, r *http.Request) {
@@ -439,6 +544,11 @@ func RedeemReward(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// ตัดยอดที่หมดอายุก่อนเริ่มทรานแซกชัน กันแลกด้วยคะแนนที่หมดอายุไปแล้ว
+	if _, err := ExpireSpecialPoints(claims.ID); err != nil {
+		log.Printf("ตัดยอดคะแนนพิเศษที่หมดอายุไม่สำเร็จ: %v", err)
+	}
+
 	tx, err := config.DB.Begin()
 	if err != nil {
 		web.Fail(w, err)
@@ -447,15 +557,15 @@ func RedeemReward(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 
 	// ล็อกทั้งของรางวัลและผู้ใช้ กันแลกเกินสต็อกและกันคะแนนติดลบเมื่อกดพร้อมกัน
-	var name, minTier string
+	var name, minTier, pointKind string
 	var cost, stock int
 	var withinWindow bool
 	err = tx.QueryRow(`
-		SELECT name, points, stock, min_tier,
+		SELECT name, points, stock, min_tier, point_kind,
 		       (starts_at IS NULL OR starts_at <= current_date)
 		       AND (ends_at IS NULL OR ends_at >= current_date)
 		FROM rewards WHERE id = $1 AND status = 'active' FOR UPDATE`,
-		rewardID).Scan(&name, &cost, &stock, &minTier, &withinWindow)
+		rewardID).Scan(&name, &cost, &stock, &minTier, &pointKind, &withinWindow)
 	if errors.Is(err, sql.ErrNoRows) {
 		web.Error(w, http.StatusNotFound, "ไม่พบของรางวัลนี้")
 		return
@@ -493,13 +603,26 @@ func RedeemReward(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// ของรางวัลแต่ละชิ้นแลกด้วยกระเป๋าเดียว ไม่ผสมสองกระเป๋า
+	// เพราะถ้าผสมแล้วผู้ใช้จะเดาไม่ออกว่าตัวเองจ่ายอะไรไปเท่าไหร่
+	special := pointKind == "special"
+
+	balanceColumn := "points"
+	shortMessage := "คะแนนของคุณไม่พอแลกของรางวัลนี้"
+	if special {
+		balanceColumn = "special_points"
+		shortMessage = "คะแนนพิเศษของคุณไม่พอแลกของรางวัลนี้"
+	}
+
 	var balance int
-	if err := tx.QueryRow(`SELECT points FROM users WHERE id = $1 FOR UPDATE`, claims.ID).Scan(&balance); err != nil {
+	if err := tx.QueryRow(
+		`SELECT `+balanceColumn+` FROM users WHERE id = $1 FOR UPDATE`,
+		claims.ID).Scan(&balance); err != nil {
 		web.Fail(w, err)
 		return
 	}
 	if balance < cost {
-		web.Error(w, http.StatusBadRequest, "คะแนนของคุณไม่พอแลกของรางวัลนี้")
+		web.Error(w, http.StatusBadRequest, shortMessage)
 		return
 	}
 
@@ -515,27 +638,35 @@ func RedeemReward(w http.ResponseWriter, r *http.Request) {
 		web.Fail(w, err)
 		return
 	}
-	if _, err := tx.Exec(`UPDATE users SET points = points - $2 WHERE id = $1`, claims.ID, cost); err != nil {
+	if _, err := tx.Exec(
+		`UPDATE users SET `+balanceColumn+` = `+balanceColumn+` - $2 WHERE id = $1`,
+		claims.ID, cost); err != nil {
 		web.Fail(w, err)
 		return
 	}
 	if _, err := tx.Exec(`
-		INSERT INTO redemptions (user_id, reward_id, ref_code, points_used) VALUES ($1,$2,$3,$4)`,
-		claims.ID, rewardID, refCode, cost); err != nil {
+		INSERT INTO redemptions (user_id, reward_id, ref_code, points_used, point_kind)
+		VALUES ($1,$2,$3,$4,$5)`,
+		claims.ID, rewardID, refCode, cost, pointKind); err != nil {
 		web.Fail(w, err)
 		return
 	}
 	if _, err := tx.Exec(`
-		INSERT INTO point_transactions (user_id, kind, source, title, points, ref_code)
-		VALUES ($1,'redeem','reward',$2,$3,$4)`,
-		claims.ID, "แลก"+name, -cost, refCode); err != nil {
+		INSERT INTO point_transactions (user_id, kind, source, title, points, ref_code, point_kind)
+		VALUES ($1,'redeem','reward',$2,$3,$4,$5)`,
+		claims.ID, "แลก"+name, -cost, refCode, pointKind); err != nil {
 		web.Fail(w, err)
 		return
+	}
+
+	unit := "คะแนน"
+	if special {
+		unit = "คะแนนพิเศษ"
 	}
 	if _, err := tx.Exec(`
 		INSERT INTO notifications (user_id, category, title, body)
 		VALUES ($1,'reward','แลกคะแนนสำเร็จ',$2)`,
-		claims.ID, fmt.Sprintf("คุณได้ใช้ %d คะแนน สำหรับการแลก %s", cost, name)); err != nil {
+		claims.ID, fmt.Sprintf("คุณได้ใช้ %d %s สำหรับการแลก %s", cost, unit, name)); err != nil {
 		web.Fail(w, err)
 		return
 	}
@@ -649,13 +780,15 @@ func Notifications(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := store.Query(`
-		SELECT id, category, title, body, read_at, created_at FROM notifications
+		SELECT id, category, title, body, read_at, created_at, translations FROM notifications
 		WHERE (user_id = $1 OR user_id IS NULL) `+filter+`
 		ORDER BY created_at DESC LIMIT 100`, args...)
 	if err != nil {
 		web.Fail(w, err)
 		return
 	}
+
+	localize(rows, requestLanguage(r))
 
 	unread := 0
 	for _, row := range rows {

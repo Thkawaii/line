@@ -5,6 +5,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+
+	"rewards/db"
 )
 
 /*
@@ -24,6 +26,7 @@ import (
 type SetupResult struct {
 	CreatedDatabase bool
 	CreatedTables   bool
+	Migrations      []string // ไฟล์ต่อเติมที่เพิ่งรันไปรอบนี้
 }
 
 // AutoSetup เตรียมฐานข้อมูลให้พร้อมใช้ และคืนว่าได้สร้างอะไรใหม่หรือไม่
@@ -44,19 +47,22 @@ func AutoSetup() (SetupResult, error) {
 	if err != nil {
 		return result, err
 	}
-	if ready {
-		return result, nil
+
+	if !ready {
+		if _, err := DB.Exec(db.Schema()); err != nil {
+			return result, err
+		}
+		result.CreatedTables = true
 	}
 
-	schema, err := os.ReadFile(SchemaPath())
+	// ต่อเติมโครงตารางให้ทันรุ่นปัจจุบันเสมอ ทั้งฐานข้อมูลใหม่และฐานข้อมูลที่ใช้งานอยู่แล้ว
+	// ไฟล์ในโฟลเดอร์ migrations เพิ่มของใหม่อย่างเดียว ไม่แตะข้อมูลเดิม
+	applied, err := RunMigrations()
 	if err != nil {
 		return result, err
 	}
-	if _, err := DB.Exec(string(schema)); err != nil {
-		return result, err
-	}
+	result.Migrations = applied
 
-	result.CreatedTables = true
 	return result, nil
 }
 
@@ -70,7 +76,14 @@ func tablesExist() (bool, error) {
 	return ok, err
 }
 
+// Schema คืนโครงตารางฉบับเต็มที่ฝังมากับโปรแกรม
+// ใช้ตัวนี้แทนการอ่านไฟล์ จะได้ไม่ขึ้นกับว่าสั่งรันจากโฟลเดอร์ไหน
+func Schema() string {
+	return db.Schema()
+}
+
 // SchemaPath หาไฟล์ schema.sql ให้เจอไม่ว่าจะสั่งจากโฟลเดอร์ backend หรือจาก root ของโปรเจค
+// เหลือไว้ให้เครื่องมือที่อยากอ้างถึงไฟล์จริงบนดิสก์ เช่นตอนไล่ปัญหา
 func SchemaPath() string {
 	for _, candidate := range []string{"db/schema.sql", "backend/db/schema.sql", "../db/schema.sql"} {
 		if _, err := os.Stat(candidate); err == nil {

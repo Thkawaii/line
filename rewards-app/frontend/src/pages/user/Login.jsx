@@ -24,7 +24,9 @@ export default function Login() {
     setError('');
     try {
       const user = await login({ identifier, password, role });
-      if (user.role === 'admin') navigate('/admin', { replace: true });
+      // พนักงานแผนกหลังบ้านมี role เป็น user แต่เข้าหลังบ้านได้
+      // จึงดูจากช่องที่เขาเลือก ไม่ใช่จาก role อย่างเดียว
+      if (role === 'admin' || user.role === 'admin') navigate('/admin', { replace: true });
       else navigate(user.terms_accepted_at ? '/' : '/terms', { replace: true });
     } catch (err) {
       setError(err.message);

@@ -13,18 +13,18 @@ import {
 } from '../../components/ui';
 import { Icon } from '../../components/icons';
 import { dateTime, num } from '../../lib/format';
-import { useT } from '../../lib/i18n';
+import { useLanguage } from '../../lib/i18n';
 
 export function FavoritesPage() {
   const toast = useToast();
-  const t = useT();
+  const { t, lang } = useLanguage();
   const [type, setType] = useState('reward');
   const [items, setItems] = useState(null);
 
   const load = useCallback(() => {
     setItems(null);
     api.favorites(type).then(({ items }) => setItems(items));
-  }, [type]);
+  }, [type, lang]);
 
   useEffect(() => {
     load();
@@ -88,13 +88,13 @@ export function FavoritesPage() {
 }
 
 export function MyRewardsPage() {
-  const t = useT();
+  const { t, lang } = useLanguage();
   const [status, setStatus] = useState('pending');
   const [items, setItems] = useState(null);
   useEffect(() => {
     setItems(null);
     api.myRewards(status).then(({ redemptions }) => setItems(redemptions));
-  }, [status]);
+  }, [status, lang]);
 
   return (
     <MobileShell title={t('myRewards.title')} back="/profile">

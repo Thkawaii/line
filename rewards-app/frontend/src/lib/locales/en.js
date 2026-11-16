@@ -69,7 +69,9 @@ export default {
   'events.schedule': 'Schedule',
   'events.openDetails': 'View details of {{title}}',
   'events.registerSuccess': 'Registered successfully',
-  'events.voteSuccess': 'Voted. You earned {{points}} points',
+  'events.voteSuccess': 'Vote submitted',
+  'events.earnedPoints': 'You earned {{points}} points',
+  'events.earnedSpecial': 'You earned {{points}} special points',
 
   'favorite.add': 'Add to favourites',
   'favorite.remove': 'Remove from favourites',
@@ -185,4 +187,78 @@ export default {
   'levelUp.rewardsWaiting': 'New benefits and rewards\nare waiting for you',
   'levelUp.viewBenefits': 'View benefits',
   'levelUp.continue': 'Continue',
+
+  /* Shared, continued */
+  'common.search': 'Search',
+  'common.closeWindow': 'Close window',
+  'common.pageOf': 'Page {{page}} of {{pages}}',
+  'common.submit': 'Submit',
+  'common.submitting': 'Submitting',
+  'common.optional': 'Optional',
+  'common.required': 'Please complete every required field first',
+  'common.noData': 'No data for this period yet',
+
+  /* Registration and surveys */
+  'surveys.title': 'Things to do',
+  'surveys.navLabel': 'To do',
+  'surveys.empty': 'Nothing to do right now',
+  'surveys.emptyHint': "We'll notify you as soon as something new comes up",
+  'surveys.pending': 'Not done yet',
+  'surveys.done': 'Done',
+  'surveys.doneAt': 'Completed on {{date}}',
+  'surveys.open': 'Open',
+  'surveys.register': 'Register',
+  'surveys.answer': 'Answer survey',
+  'surveys.giveFeedback': 'Share feedback',
+  'surveys.comment': 'Additional comments',
+  'surveys.commentPlaceholder': 'Anything else you would like to tell us',
+  'surveys.anonymousNote':
+    'Your answers only count towards your section totals. Administrators cannot see which answer came from whom.',
+  'surveys.identifiedNote':
+    'Administrators and general affairs staff will see your name alongside this answer',
+  'surveys.success': 'Saved. Thank you!',
+  'surveys.successPoints': 'Saved. You earned {{points}} points',
+  'surveys.already': 'You have already completed this',
+  'surveys.closesOn': 'Open until {{date}}',
+  'surveys.earnPoints': 'Earn {{points}} points',
+
+  /* Announcements */
+  'news.badge': 'Announcement',
+  'news.counter': '{{index}} of {{total}}',
+  'news.publishedAt': 'Published {{date}}',
+  'news.endOfContent': '— End of content —',
+  'news.acknowledge': 'I acknowledge this announcement',
+
+  /* Special points */
+  'points.special': 'Special points',
+  'points.specialBalance': 'Your special points',
+  'points.normal': 'Regular points',
+  'rewards.useSpecial': 'Redeem with special points',
+
+  /* Location check when registering */
+  'events.needsLocation': 'Register at the venue',
+  'events.locationHint': 'This activity checks your location. Register once you are at the venue.',
+  'events.checkingLocation': 'Checking your location',
+  'events.locationDenied': 'Your browser has not been allowed to read your location.',
+  'events.locationUnavailable': 'The system could not read a location from your device.',
+  'events.locationInsecure':
+    'Location needs an https connection. Please let your administrator know.',
+  'events.outsideVenue': 'You are not at the venue (about {{distance}} away)',
+
+  /* Announcement link and attachment */
+  'news.openLink': 'Open link',
+  'news.openFile': 'Open attachment',
+
+  /* Location problem dialog */
+  'events.tryAgain': 'Try again',
+  'events.outsideVenueTitle': 'You are not at the venue',
+  'events.outsideVenueDetail': 'You are about {{distance}} away from the venue',
+  'events.outsideVenueHint': 'Please come to the venue, then register again',
+  'events.locationDeniedTitle': 'Location access is blocked',
+  'events.locationDeniedHint':
+    'Tap the padlock icon next to the address bar, allow location, then try again',
+  'events.locationUnavailableTitle': 'Could not find your location',
+  'events.locationUnavailableHint':
+    'Turn on GPS, or step outside for a moment, then try again',
+  'events.locationInsecureTitle': 'This site is not served over https',
 };

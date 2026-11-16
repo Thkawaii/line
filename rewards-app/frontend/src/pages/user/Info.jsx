@@ -6,7 +6,7 @@ import PolicyBody from '../../components/PolicyBody';
 import { ChipBar, EmptyState, Spinner } from '../../components/ui';
 import { Icon } from '../../components/icons';
 import { clockTime, groupByDay, relativeDay, thaiDate } from '../../lib/format';
-import { useT } from '../../lib/i18n';
+import { useLanguage } from '../../lib/i18n';
 
 const CATEGORIES = [
   { value: 'all', key: 'common.all' },
@@ -24,7 +24,7 @@ const CATEGORY_STYLE = {
 };
 
 export function NotificationsPage() {
-  const t = useT();
+  const { t, lang } = useLanguage();
   const [category, setCategory] = useState('all');
   const [data, setData] = useState(null);
 
@@ -33,7 +33,7 @@ export function NotificationsPage() {
   useEffect(() => {
     setData(null);
     load(category);
-  }, [category]);
+  }, [category, lang]);
 
   async function readAll() {
     await api.readAllNotifications();
@@ -99,13 +99,13 @@ export function NotificationsPage() {
 }
 
 export function FaqPage() {
-  const t = useT();
+  const { t, lang } = useLanguage();
   const [faqs, setFaqs] = useState(null);
   const [open, setOpen] = useState(null);
 
   useEffect(() => {
     api.faqs().then(({ faqs }) => setFaqs(faqs));
-  }, []);
+  }, [lang]);
 
   return (
     <MobileShell title={t('faq.title')} back="/profile">
@@ -142,14 +142,14 @@ export function FaqPage() {
 }
 
 export function PolicyPage() {
-  const t = useT();
+  const { t, lang } = useLanguage();
   const { key = 'terms' } = useParams();
   const [policy, setPolicy] = useState(null);
 
   useEffect(() => {
     setPolicy(null);
     api.policy(key).then(({ policy }) => setPolicy(policy));
-  }, [key]);
+  }, [key, lang]);
 
   return (
     <MobileShell title={t('policy.title')} back="/profile">

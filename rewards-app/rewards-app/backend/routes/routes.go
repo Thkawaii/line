@@ -48,7 +48,8 @@ func Setup() *http.ServeMux {
 	user("GET /api/app/faqs", controllers.Faqs)
 	user("GET /api/app/policies/{key}", controllers.Policy)
 	user("GET /api/app/tiers", controllers.Tiers)
-	user("GET /api/app/qr-token", controllers.QrToken)
+	user("GET /api/app/surveys", controllers.Surveys)
+	user("POST /api/app/surveys/{id}/submit", controllers.SubmitSurvey)
 
 	/* ฝั่งผู้ดูแลระบบ */
 	admin := func(pattern string, handler http.HandlerFunc) {
@@ -57,11 +58,13 @@ func Setup() *http.ServeMux {
 
 	admin("GET /api/admin/overview", controllers.AdminOverview)
 	admin("GET /api/admin/analytics", controllers.AdminAnalytics)
+	admin("GET /api/admin/analytics/frequency", controllers.AdminFrequencyPeople)
 
 	admin("GET /api/admin/employees", controllers.AdminEmployees)
 	admin("POST /api/admin/employees", controllers.AdminCreateEmployee)
 	admin("GET /api/admin/employees/{id}", controllers.AdminEmployee)
 	admin("PATCH /api/admin/employees/{id}", controllers.AdminUpdateEmployee)
+	admin("DELETE /api/admin/employees/{id}", controllers.AdminDeleteEmployee)
 
 	admin("GET /api/admin/points", controllers.AdminPoints)
 	admin("POST /api/admin/points/adjust", controllers.AdminAdjustPoints)
@@ -79,6 +82,7 @@ func Setup() *http.ServeMux {
 	admin("POST /api/admin/events", controllers.AdminCreateEvent)
 	admin("PATCH /api/admin/events/{id}", controllers.AdminUpdateEvent)
 	admin("POST /api/admin/events/{id}/check-in", controllers.AdminCheckIn)
+	admin("GET /api/admin/events/{id}/registrations", controllers.AdminEventRegistrations)
 
 	admin("GET /api/admin/notifications", controllers.AdminNotifications)
 	admin("POST /api/admin/notifications", controllers.AdminCreateNotification)
@@ -114,6 +118,30 @@ func Setup() *http.ServeMux {
 	admin("PUT /api/admin/settings", controllers.AdminSaveSettings)
 
 	admin("GET /api/admin/audit-logs", controllers.AdminAuditLogs)
+
+	/* คำแปลอัตโนมัติ */
+	admin("GET /api/admin/translations", controllers.AdminTranslationStatus)
+	admin("GET /api/admin/translations/items", controllers.AdminTranslationItems)
+	admin("POST /api/admin/translations/run", controllers.AdminRunTranslations)
+	admin("POST /api/admin/translations/rebuild", controllers.AdminRebuildTranslations)
+	admin("PUT /api/admin/translations/{table}", controllers.AdminSaveTranslation)
+
+	/* หัวข้อลงทะเบียน / แบบสำรวจ */
+	admin("POST /api/admin/surveys", controllers.AdminCreateSurvey)
+	admin("PATCH /api/admin/surveys/{id}", controllers.AdminUpdateSurvey)
+	admin("DELETE /api/admin/surveys/{id}", controllers.AdminDeleteSurvey)
+
+	// รายชื่อและคำตอบ — ผู้ดูแลระบบเท่านั้น
+	admin("GET /api/admin/surveys/{id}/pending", controllers.AdminSurveyPending)
+	admin("GET /api/admin/surveys/{id}/responses", controllers.AdminSurveyResponses)
+	admin("POST /api/admin/surveys/{id}/remind", controllers.AdminRemindSurvey)
+
+	// รายงานสรุป — ไม่มีชื่อใครอยู่ในผลลัพธ์ จึงเปิดให้ฝ่ายธุรการ (role ga) ดูได้
+	report := func(pattern string, handler http.HandlerFunc) {
+		mux.HandleFunc(pattern, middleware.RequireReport(handler))
+	}
+	report("GET /api/admin/surveys", controllers.AdminSurveys)
+	report("GET /api/admin/surveys/{id}/summary", controllers.AdminSurveySummary)
 
 	// เส้นทางที่ไม่ตรงกับอะไรเลย ตอบ JSON เพื่อให้หน้าเว็บอ่าน error ได้
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

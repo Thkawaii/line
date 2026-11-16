@@ -98,7 +98,6 @@ func settings() error {
 		('points_expire_month','12','เดือนที่คะแนนหมดอายุ (1-12)','number'),
 		('points_expire_day','31','วันที่คะแนนหมดอายุ','number'),
 		('expire_warn_days','30','แจ้งเตือนล่วงหน้าก่อนคะแนนหมดอายุ (วัน)','number'),
-		('qr_ttl_seconds','300','อายุ QR ประจำตัว (วินาที)','number'),
 		('redeem_limit_per_month','1','จำกัดการแลกของรางวัลต่อคนต่อเดือน (0 = ไม่จำกัด)','number'),
 		('allow_self_register','false','ให้พนักงานสมัครบัญชีเองได้','boolean')
 		ON CONFLICT (key) DO NOTHING`); err != nil {

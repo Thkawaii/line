@@ -6,7 +6,8 @@ import { Avatar, Badge, ChipBar, EmptyState, Spinner } from '../../components/ui
 import { Icon } from '../../components/icons';
 import { clockTime, groupByDay, num, signedPoints, thaiDate } from '../../lib/format';
 import { tierCard, tierIcon } from '../../lib/tier';
-import { useT } from '../../lib/i18n';
+import { useLanguage, useT } from '../../lib/i18n';
+import { SpecialPointIcon } from '../../components/SpecialPoints';
 
 const SOURCE_ICON = {
   vote: Icon.Vote,
@@ -20,6 +21,7 @@ function TransactionRow({ tx, showStatus = false }) {
   const t = useT();
   const Ico = SOURCE_ICON[tx.source] || Icon.History;
   const positive = tx.points > 0;
+  const special = tx.point_kind === 'special';
 
   return (
     <li className="flex items-center gap-3 border-b border-line bg-white px-4 py-3 last:border-0">
@@ -43,20 +45,27 @@ function TransactionRow({ tx, showStatus = false }) {
         </p>
       </div>
 
-      <span className={`shrink-0 font-bold ${positive ? 'text-success' : 'text-danger'}`}>
-        {signedPoints(tx.points)} {t('common.points')}
+      {/* ประวัติรวมสองกระเป๋าไว้ด้วยกัน จึงต้องมีไอคอนกำกับ
+          ไม่งั้นผู้ใช้บวกเลขแล้วไม่ตรงกับยอดคงเหลือและคิดว่าระบบผิด */}
+      <span
+        className={`flex shrink-0 items-center gap-1 font-bold ${
+          positive ? 'text-success' : 'text-danger'
+        }`}
+      >
+        {special && <SpecialPointIcon size={16} />}
+        {signedPoints(tx.points)} {special ? t('points.special') : t('common.points')}
       </span>
     </li>
   );
 }
 
 export function PointsPage() {
-  const t = useT();
+  const { t, lang } = useLanguage();
   const [data, setData] = useState(null);
 
   useEffect(() => {
     api.points().then(setData);
-  }, []);
+  }, [lang]);
 
   if (!data) {
     return (
@@ -94,6 +103,17 @@ export function PointsPage() {
           <p className={`mt-2 text-2xs ${theme.muted}`}>
             {t('points.expireAt', { date: user.points_expire_at ? thaiDate(user.points_expire_at) : '-' })}
           </p>
+
+          {/* คะแนนพิเศษ — วางเป็นบรรทัดเดียวบนพื้นการ์ดเดิม ไม่ใส่กล่องพื้นหลังทับ
+              เพราะกล่องสีอ่อนบนการ์ดสีเข้มจะกลายเป็นแถบเทาที่แย่งสายตาจากคะแนนหลัก
+              คั่นด้วยเส้นบาง ๆ แทน บอกได้ว่าเป็นคนละกระเป๋าโดยไม่ตัดการ์ดเป็นสองท่อน */}
+          <div className={`mt-4 flex items-center justify-center gap-2 border-t pt-4 ${theme.divider}`}>
+            <SpecialPointIcon size={26} />
+            <span className={`text-xl font-bold leading-none ${theme.value}`}>
+              {num(user.special_points || 0)}
+            </span>
+            <span className={`text-sm ${theme.muted}`}>{t('points.special')}</span>
+          </div>
         </section>
 
         <div className="grid grid-cols-2 gap-3">
@@ -153,14 +173,14 @@ const FILTERS = [
 ];
 
 export function PointsHistoryPage() {
-  const t = useT();
+  const { t, lang } = useLanguage();
   const [filter, setFilter] = useState('all');
   const [transactions, setTransactions] = useState(null);
 
   useEffect(() => {
     setTransactions(null);
     api.pointsHistory(filter).then(({ transactions }) => setTransactions(transactions));
-  }, [filter]);
+  }, [filter, lang]);
 
   return (
     <MobileShell title={t('points.historyTitle')} back="/points">

@@ -7,21 +7,23 @@ import { ChipBar, EmptyState, ImagePlaceholder, Modal, SearchInput, Spinner, use
 import { Icon } from '../../components/icons';
 import { num } from '../../lib/format';
 import { pointsBadge } from '../../lib/tier';
-import { useT } from '../../lib/i18n';
+import { SpecialPointIcon } from '../../components/SpecialPoints';
+import { useLanguage } from '../../lib/i18n';
 
 export default function Rewards() {
   const toast = useToast();
-  const t = useT();
+  const { t, lang } = useLanguage();
   const [params, setParams] = useSearchParams();
   const [q, setQ] = useState('');
-  const [category, setCategory] = useState('ทั้งหมด');
+  // ค่าว่างคือ "ทุกหมวด" — ไม่ผูกกับคำในภาษาใดภาษาหนึ่ง ฝั่งเซิร์ฟเวอร์จึงแค่เช็กว่าว่างไหม
+  const [category, setCategory] = useState('');
   const [data, setData] = useState(null);
   const [active, setActive] = useState(null);
   const [success, setSuccess] = useState(null);
 
   const load = useCallback(() => {
     api.rewards({ q, category }).then(setData);
-  }, [q, category]);
+  }, [q, category, lang]);
 
   useEffect(() => {
     const timer = setTimeout(load, q ? 250 : 0);
@@ -58,25 +60,42 @@ export default function Rewards() {
     setActive((prev) => (prev && prev.id === reward.id ? { ...prev, favorite } : prev));
   }
 
-  // ชื่อหมวดหมู่เป็นข้อมูลที่ผู้ดูแลกรอก จึงแสดงตามที่กรอกไว้ ไม่ได้แปล
-  const categories = ['ทั้งหมด', ...(data?.categories || [])];
-  const notEnough = active && data && !active.locked && data.points < active.points;
+  // ชื่อหมวดหมู่เป็นข้อมูลที่ผู้ดูแลกรอก ถูกแปลมาจากเซิร์ฟเวอร์แล้วตามภาษาที่เลือก
+  const categories = [
+    { value: '', label: t('common.all') },
+    ...(data?.categories || []).map((name) => ({ value: name, label: name })),
+  ];
+  // ของรางวัลแต่ละชิ้นแลกด้วยกระเป๋าเดียว จึงเทียบกับยอดของกระเป๋านั้น
+  const activeSpecial = active?.point_kind === 'special';
+  const activeBalance = activeSpecial ? data?.specialPoints : data?.points;
+  const notEnough = active && data && !active.locked && activeBalance < active.points;
 
   return (
     <MobileShell title={t('rewards.title')} back="/">
       <div className="space-y-3 px-4 py-4">
-        <div className="flex items-center gap-2 rounded-pill border border-line bg-white px-3 py-2.5 shadow-card">
-          <span className="grid h-7 w-7 place-items-center rounded-full bg-[#4A5555] text-white">
-            <Icon.Star size={16} />
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-pill border border-line bg-white px-3 py-2.5 shadow-card">
+          <span className="flex items-center gap-2">
+            <span className="grid h-7 w-7 place-items-center rounded-full bg-[#4A5555] text-white">
+              <Icon.Star size={16} />
+            </span>
+            <span className="text-sm text-slate">
+              {t('rewards.yourPoints')} : <b className="text-ink">{num(data?.points)}</b>{' '}
+              {t('common.points')}
+            </span>
           </span>
-          <span className="text-sm text-slate">
-            {t('rewards.yourPoints')} : <b className="text-ink">{num(data?.points)}</b> {t('common.points')}
+
+          {/* แสดงเสมอ คู่กับคะแนนปกติ พนักงานจะได้เทียบได้ทันทีว่าแลกอะไรไหว */}
+          <span className="flex items-center gap-1.5">
+            <SpecialPointIcon size={26} />
+            <span className="text-sm text-slate">
+              <b className="text-ink">{num(data?.specialPoints || 0)}</b> {t('points.special')}
+            </span>
           </span>
         </div>
 
         <SearchInput value={q} onChange={setQ} placeholder={t('rewards.searchPlaceholder')} />
         <ChipBar
-          options={categories.map((c) => ({ value: c, label: c === 'ทั้งหมด' ? t('common.all') : c }))}
+          options={categories}
           value={category}
           onChange={setCategory}
         />
@@ -93,6 +112,7 @@ export default function Rewards() {
               key={reward.id}
               reward={reward}
               myPoints={data.points}
+              mySpecialPoints={data.specialPoints}
               onOpen={() => setActive(reward)}
               onFavorite={() => toggleFavorite(reward)}
               onRedeem={() => setActive(reward)}
@@ -130,20 +150,29 @@ export default function Rewards() {
               <div className="mt-2 flex items-center justify-between">
                 <p className="flex items-center gap-2">
                   {/* ไอคอนหน้าแต้มคะแนนผูกกับระดับของรางวัล ให้ตรงกับป้าย Elite/Silver ด้านบนรูปเสมอ */}
-                  {(() => {
-                    const { circleClass, Icon: PointsIcon } = pointsBadge(active.min_tier);
-                    return (
-                      <span className={`grid h-6 w-6 place-items-center rounded-full ${circleClass}`}>
-                        <PointsIcon size={14} />
-                      </span>
-                    );
-                  })()}
+                  {activeSpecial ? (
+                    <SpecialPointIcon size={26} />
+                  ) : (
+                    (() => {
+                      const { circleClass, Icon: PointsIcon } = pointsBadge(active.min_tier);
+                      return (
+                        <span className={`grid h-6 w-6 place-items-center rounded-full ${circleClass}`}>
+                          <PointsIcon size={14} />
+                        </span>
+                      );
+                    })()
+                  )}
                   <span className="text-lg font-bold text-primary">{num(active.points)}</span>
-                  <span className="text-sm text-muted">{t('common.points')}</span>
+                  <span className="text-sm text-muted">
+                    {activeSpecial ? t('points.special') : t('common.points')}
+                  </span>
                 </p>
                 <span className="text-sm text-muted">{t('rewards.stock', { count: active.stock })}</span>
               </div>
-              <p className="mt-1 text-sm text-muted">{t('rewards.yourPointsIs', { points: num(data.points) })}</p>
+              <p className="mt-1 text-sm text-muted">
+                {t('rewards.yourPointsIs', { points: num(activeBalance) })}
+                {activeSpecial && ` (${t('points.special')})`}
+              </p>
 
               {active.days_left !== null && active.days_left !== undefined && (
                 <p className="mt-2 inline-flex items-center gap-1.5 rounded-pill bg-danger-wash px-3 py-1 text-sm font-medium text-danger">

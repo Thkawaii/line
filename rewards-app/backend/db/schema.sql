@@ -1,6 +1,10 @@
 -- ระบบสะสมคะแนนพนักงาน — PostgreSQL schema
 -- รัน: psql $DATABASE_URL -f db/schema.sql
 
+DROP TABLE IF EXISTS schema_migrations  CASCADE;
+DROP TABLE IF EXISTS translation_cache   CASCADE;
+DROP TABLE IF EXISTS survey_responses    CASCADE;
+DROP TABLE IF EXISTS survey_topics       CASCADE;
 DROP TABLE IF EXISTS notification_events CASCADE;
 DROP TABLE IF EXISTS audit_logs          CASCADE;
 DROP TABLE IF EXISTS settings            CASCADE;

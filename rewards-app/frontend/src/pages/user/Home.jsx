@@ -7,7 +7,8 @@ import { ImagePlaceholder, Spinner } from '../../components/ui';
 import TierProgress from '../../components/TierProgress';
 import { dateRange, num, timeRange } from '../../lib/format';
 import { tierCard, tierCircle, tierIcon } from '../../lib/tier';
-import { useT } from '../../lib/i18n';
+import { useLanguage, useT } from '../../lib/i18n';
+import { SpecialPointIcon } from '../../components/SpecialPoints';
 import LanguagePicker from '../../components/LanguagePicker';
 
 /**
@@ -39,14 +40,14 @@ function BannerSlide({ banner }) {
 
 export default function Home() {
   const navigate = useNavigate();
-  const t = useT();
+  const { t, lang } = useLanguage();
   const [data, setData] = useState(null);
   const [slide, setSlide] = useState(0);
   const trackRef = useRef(null);
 
   useEffect(() => {
     api.home().then(setData).catch(() => setData(null));
-  }, []);
+  }, [lang]);
 
   if (!data) {
     return (
@@ -100,6 +101,16 @@ export default function Home() {
 
           <p className={`mt-3 text-[26px] font-bold leading-none ${theme.value}`}>
             {num(user.points)} <span className="text-xl">{t('common.points')}</span>
+          </p>
+
+          {/* คะแนนพิเศษเป็นกระเป๋าคนละใบ แสดงคู่กันตั้งแต่หน้าแรก
+              พนักงานจะได้ไม่งงว่าทำไมแลกของที่ติดไอคอนนี้ไม่ได้ทั้งที่คะแนนดูเยอะ */}
+          <p className="mt-2 flex items-center gap-1.5">
+            <SpecialPointIcon size={22} />
+            <span className={`text-base font-bold ${theme.value}`}>
+              {num(user.special_points || 0)}
+            </span>
+            <span className={`text-2xs ${theme.muted}`}>{t('points.special')}</span>
           </p>
 
           <div className="mt-3">
@@ -177,9 +188,12 @@ export default function Home() {
                 <ImagePlaceholder src={reward.image_url} className="aspect-square w-full" />
                 <div className="p-2.5">
                   <p className="line-clamp-2 text-sm font-semibold text-ink">{reward.name}</p>
-                  <p className="mt-1 text-sm font-bold text-primary">
+                  <p className="mt-1 flex items-center gap-1 text-sm font-bold text-primary">
+                    {reward.point_kind === 'special' && <SpecialPointIcon size={16} />}
                     {num(reward.points)}{' '}
-                    <span className="text-2xs font-normal text-muted">{t('common.points')}</span>
+                    <span className="text-2xs font-normal text-muted">
+                      {reward.point_kind === 'special' ? t('points.special') : t('common.points')}
+                    </span>
                   </p>
                 </div>
               </button>
@@ -215,6 +229,12 @@ export default function Home() {
                     <p className="mt-1 text-sm text-muted">
                       {t('home.receive')} <span className="font-bold text-primary">{num(event.points)}</span>{' '}
                       {t('common.points')}
+                      {event.special_points > 0 && (
+                        <span className="ml-2 inline-flex items-center gap-1">
+                          <SpecialPointIcon size={15} />
+                          <span className="font-bold text-primary">{num(event.special_points)}</span>
+                        </span>
+                      )}
                     </p>
                   </div>
                 </Link>

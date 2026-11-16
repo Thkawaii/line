@@ -62,8 +62,10 @@ func Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// ช่องเข้าสู่ระบบฝั่งผู้ดูแลเปิดให้ฝ่ายธุรการ (role ga) ด้วย
+	// แต่เข้าได้เฉพาะหน้ารายงานสรุปที่ไม่มีรายชื่อพนักงาน ดูที่ middleware.RequireReport
 	role, _ := user["role"].(string)
-	if body.Role == "admin" && role != "admin" {
+	if body.Role == "admin" && role != "admin" && role != "ga" {
 		web.Error(w, http.StatusForbidden, "บัญชีนี้ไม่มีสิทธิ์เข้าหน้าผู้ดูแลระบบ")
 		return
 	}

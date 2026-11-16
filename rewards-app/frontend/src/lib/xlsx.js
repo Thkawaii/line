@@ -27,7 +27,7 @@ function crc32(bytes) {
   return (c ^ 0xffffffff) >>> 0;
 }
 
-function zip(files) {
+export function zip(files) {
   const encoder = new TextEncoder();
   const chunks = [];
   const central = [];
@@ -110,14 +110,14 @@ function zip(files) {
 
 /* ---------- xlsx ---------- */
 
-const escapeXml = (value) =>
+export const escapeXml = (value) =>
   String(value)
     .replaceAll('&', '&amp;')
     .replaceAll('<', '&lt;')
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;');
 
-const columnName = (index) => {
+export const columnName = (index) => {
   let name = '';
   let n = index;
   do {
