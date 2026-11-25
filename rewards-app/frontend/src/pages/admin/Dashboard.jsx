@@ -5,7 +5,7 @@ import AdminShell from '../../components/AdminShell';
 import { Select } from '../../components/ComboBox';
 import { Badge, Modal, ProgressBar, Spinner } from '../../components/ui';
 import { Icon } from '../../components/icons';
-import { dateRange, dateTime, num } from '../../lib/format';
+import { dateRange, dateTime, num, thaiDate } from '../../lib/format';
 import { tierIcon, tierSolidCircle } from '../../lib/tier';
 import { DonutChart, LineChart, PointsChart, RankBar } from '../../components/charts';
 
@@ -246,7 +246,7 @@ function Panel({ title, hint, action, children, className = '' }) {
   );
 }
 
-function MiniStat({ icon: Ico, label, value, tone = 'text-primary', surface = 'bg-white' }) {
+function MiniStat({ icon: Ico, label, value, foot, tone = 'text-primary', surface = 'bg-white' }) {
   return (
     <div className={`rounded-card border border-line p-4 ${surface}`}>
       <p className="flex items-center gap-2 text-sm font-medium text-slate">
@@ -256,6 +256,8 @@ function MiniStat({ icon: Ico, label, value, tone = 'text-primary', surface = 'b
         {label}
       </p>
       <p className={`mt-2 text-2xl font-bold leading-none ${tone}`}>{value}</p>
+      {/* ตัวหารของเปอร์เซ็นต์ ถ้าไม่โชว์ไว้ คนอ่านจะตรวจทานเลขเองไม่ได้ */}
+      {foot ? <p className="mt-1 text-2xs text-muted">{foot}</p> : null}
     </div>
   );
 }
@@ -266,6 +268,7 @@ function AnalyticsTab() {
     range: 'year',
     department: 'all',
     tier: 'all',
+    event: 'all',
     year: now.getFullYear(),
     fromMonth: 1,
     toMonth: now.getMonth() + 1,
@@ -273,26 +276,123 @@ function AnalyticsTab() {
   const [data, setData] = useState(null);
   const [bucket, setBucket] = useState(null);
 
+  const [loading, setLoading] = useState(false);
+
+  /*
+    ไม่ล้างข้อมูลเดิมทิ้งตอนโหลดรอบใหม่
+
+    เดิมสั่ง setData(null) ก่อนยิง ทำให้ทั้งหน้าถูกถอดออกแล้วแทนด้วยตัวหมุน
+    ความสูงหน้าหดเหลือไม่กี่สิบพิกเซล เบราว์เซอร์จึงเลื่อนกลับขึ้นบนสุดเอง
+    พอข้อมูลมา หน้ายืดกลับ แต่ตำแหน่งที่เคยดูอยู่หายไปแล้ว
+
+    ตอนนี้คงของเดิมไว้แล้วหรี่ลงระหว่างรอ ความสูงไม่เปลี่ยน
+    คนที่เลื่อนลงมาดูกราฟล่างแล้วเปลี่ยนตัวกรอง จึงยังอยู่ที่เดิม
+  */
   useEffect(() => {
-    setData(null);
-    api.adminAnalytics(filters).then(setData);
+    let cancelled = false;
+    setLoading(true);
+
+    api
+      .adminAnalytics(filters)
+      .then((result) => {
+        if (!cancelled) setData(result);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    // กดเปลี่ยนตัวกรองรัว ๆ แล้วคำตอบเก่ามาทีหลัง ต้องไม่ทับคำตอบใหม่
+    return () => {
+      cancelled = true;
+    };
   }, [filters]);
 
   // Select ของระบบคืนค่าที่เลือกมาตรง ๆ ไม่ใช่ event เหมือน <select> ของเบราว์เซอร์
   const pick = (key) => (value) => setFilters((f) => ({ ...f, [key]: value }));
 
+  /*
+    เปลี่ยนช่วงเวลาแล้วล้างกิจกรรมที่เลือกไว้ทิ้งเสมอ
+
+    แต่ละปีมีกิจกรรมคนละชุด กิจกรรมของปี 2569 ไม่มีอยู่ในข้อมูลปี 2568
+    ถ้าปล่อยค้างไว้ ผู้ดูแลจะสลับปีแล้วเจอกราฟว่างเปล่าโดยไม่รู้ว่าเพราะตัวกรองค้าง
+    ไม่ใช่เพราะปีนั้นไม่มีข้อมูล
+
+    ล้างทิ้งเลยดีกว่าพยายามจับคู่กิจกรรมชื่อเดียวกันข้ามปีให้ เพราะ "กีฬาสีประจำปี"
+    ของสองปีคือคนละงานกัน การจับคู่ให้เองจะกลายเป็นการสลับข้อมูลใต้มือผู้ใช้
+  */
+  const pickRange = (key) => (value) =>
+    setFilters((f) => ({ ...f, [key]: value, event: 'all' }));
+
+  // ตัวหมุนเต็มหน้าเฉพาะครั้งแรกที่ยังไม่มีข้อมูลอะไรเลย
+  // รอบถัดไปใช้การหรี่แทน หน้าจะได้ไม่หดจนเลื่อนเด้งขึ้นบน
   if (!data) return <Spinner />;
 
   const { events, points } = data;
 
+  /*
+    เซิร์ฟเวอร์รุ่นเก่ายังส่งคีย์ชุดเดิมมา ฟิลด์ที่เพิ่มใหม่จึงเป็น undefined
+    แล้วหน้าจอขึ้นว่า "undefined %" ซึ่งไม่บอกอะไรเลยว่าต้องไปทำอะไรต่อ
+
+    ตรวจจากฟิลด์ที่รู้ว่ามีเฉพาะรุ่นใหม่ แล้วบอกตรง ๆ ว่าให้รีสตาร์ทเซิร์ฟเวอร์
+    ดีกว่าปล่อยให้เห็นคำว่า undefined แล้วเดาว่าข้อมูลเสีย
+  */
+  const staleServer = events.joinRate === undefined || events.audience === undefined;
+
+  const eventChoices = [
+    { value: 'all', label: 'ทุกกิจกรรม' },
+    ...(data.eventOptions || []).map((e) => ({ value: String(e.id), label: e.label })),
+  ];
+
+  /*
+    เลือกกิจกรรมเดียว = ทั้งหน้ากลายเป็นรายงานของงานนั้นงานเดียว
+
+    บล็อกที่ผูกกับกิจกรรมไม่ได้ (ของรางวัล, ภาพรวมคะแนนรวมของทั้งระบบ) ถูกซ่อนไว้
+    เพราะการแลกของรางวัลไม่ได้เกิดจากกิจกรรมใดกิจกรรมหนึ่ง ถ้าปล่อยให้แสดงต่อ
+    ตัวเลขพวกนั้นจะเป็นของทั้งระบบ ปนอยู่กับตัวเลขของงานเดียว แล้วอ่านรวมกันผิด
+  */
+  const oneEvent = filters.event !== 'all';
+  const eventName = oneEvent
+    ? (eventChoices.find((c) => c.value === filters.event)?.label ?? 'กิจกรรมที่เลือก')
+    : '';
+
+  /*
+    ตัวเศษของเปอร์เซ็นต์เปลี่ยนความหมายไปตามช่องเลือกกิจกรรม
+
+      ทุกกิจกรรม   = เฉลี่ยจากกิจกรรมทั้งหมดในช่วงที่เลือก (N กิจกรรม)
+      กิจกรรมเดียว = อัตราของกิจกรรมนั้นกิจกรรมเดียว (เฉลี่ยจากหนึ่งงาน ก็คืองานนั้นเอง)
+
+    สูตรเดียวกันทั้งสองโหมด แต่ตัวเลขที่ได้ต่างกันคนละเรื่อง
+    ตรวจกับข้อมูลจริงสามงาน (19/10/4 คน จากพนักงาน 31 คน) ได้
+      ทุกกิจกรรม     เฉลี่ย 11 คน  → 35.48%
+      เฉพาะงานแรก    19 คน        → 61.29%
+    ถ้าหน้าจอไม่เขียนว่ากำลังดูโหมดไหน สองเลขนี้จะดูเหมือนเลขเดียวกันที่ขัดกันเอง
+  */
+  const basis = oneEvent
+    ? `${eventName} กิจกรรมเดียว`
+    : events.events
+      ? `เฉลี่ยจาก ${num(events.events)} กิจกรรมในช่วงนี้`
+      : 'เฉลี่ยทุกกิจกรรมในช่วงนี้';
+  const scopeFoot = oneEvent ? 'เฉพาะกิจกรรมที่เลือก' : 'รวมทุกกิจกรรมในช่วงที่เลือก';
+
   return (
-    <div className="space-y-8">
+    <div
+      className={`space-y-8 transition-opacity ${loading ? 'pointer-events-none opacity-60' : ''}`}
+    >
+      {staleServer && (
+        <div className="rounded-card bg-gold-wash px-4 py-3 text-sm text-gold-ink">
+          <b>เซิร์ฟเวอร์ที่รันอยู่ยังเป็นรุ่นเก่า</b> ตัวเลขบางช่องจึงขึ้นเป็นขีด
+          <br />
+          ปิดแล้วสั่ง <code className="rounded bg-white/60 px-1">go run .</code> ใหม่ในโฟลเดอร์
+          backend ระบบจะต่อเติมตารางให้เองตอนเปิด
+        </div>
+      )}
+
       {/* ตัวกรองใช้ร่วมกันทุกบล็อกในหน้านี้ */}
       <div className="flex flex-wrap items-center justify-end gap-x-6 gap-y-3">
         <label className="flex items-center gap-2 text-sm text-slate">
           ช่วงวันที่
           <div className="w-32">
-            <Select options={RANGES} value={filters.range} onChange={pick('range')} />
+            <Select options={RANGES} value={filters.range} onChange={pickRange('range')} />
           </div>
         </label>
 
@@ -303,14 +403,14 @@ function AnalyticsTab() {
               <Select
                 options={YEAR_OPTIONS.map((y) => ({ value: String(y), label: String(y + 543) }))}
                 value={String(filters.year)}
-                onChange={pick('year')}
+                onChange={pickRange('year')}
               />
             </div>
             <div className="w-32">
               <Select
                 options={monthChoices}
                 value={String(filters.fromMonth)}
-                onChange={pick('fromMonth')}
+                onChange={pickRange('fromMonth')}
               />
             </div>
             ถึง
@@ -318,7 +418,7 @@ function AnalyticsTab() {
               <Select
                 options={monthChoices}
                 value={String(filters.toMonth)}
-                onChange={pick('toMonth')}
+                onChange={pickRange('toMonth')}
               />
             </div>
           </div>
@@ -353,6 +453,15 @@ function AnalyticsTab() {
             />
           </div>
         </label>
+
+        {/* กิจกรรม: เลือกทีละงานเพื่อให้ทั้งหน้ากลายเป็นรายงานของงานนั้นงานเดียว
+            อยู่แถวเดียวกับตัวกรองอื่น เพราะทั้งสี่ตัวทำงานร่วมกันเป็นชุดเดียว */}
+        <label className="flex items-center gap-2 text-sm text-slate">
+          กิจกรรม
+          <div className="w-48">
+            <Select options={eventChoices} value={filters.event} onChange={pick('event')} />
+          </div>
+        </label>
       </div>
 
       {/* 1. การวิเคราะห์กิจกรรม */}
@@ -360,16 +469,34 @@ function AnalyticsTab() {
         <h2 className="mb-3 border-l-4 border-primary pl-2 font-bold text-ink">1. การวิเคราะห์กิจกรรม</h2>
 
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <MiniStat icon={Icon.Users} label="ลงทะเบียน" value={num(events.registered)} />
-          <MiniStat icon={Icon.Check} label="เข้าร่วมจริง" value={num(events.attended)} />
-          <MiniStat icon={Icon.Clock} label="อัตราการเข้าร่วมกิจกรรม" value={`${events.rate} %`} />
-          <MiniStat icon={Icon.Warning} label="ไม่มาตามนัด" value={num(events.noShow)} tone="text-gold" />
+          <MiniStat icon={Icon.Check} label="ลงทะเบียน" value={num(events.registered)} foot={scopeFoot} />
+          <MiniStat icon={Icon.Users} label="เข้าร่วมจริง" value={num(events.attended)} foot="เช็กอินหน้างานแล้ว" />
+          {/* สองอัตราข้างล่างใช้ตัวหารเดียวกัน (พนักงานทั้งหมด) จะได้บวกกันเป็น 100% พอดี
+              บรรทัดเล็กใต้เลขบอกทั้งตัวเศษและตัวหาร ถ้าไม่บอก คนอ่านจะตรวจทานเองไม่ได้
+              และจะแยกไม่ออกว่ากำลังดูค่าเฉลี่ยทั้งช่วง หรือดูกิจกรรมเดียว */}
+          <MiniStat
+            icon={Icon.Clock}
+            label="อัตราการเข้าร่วม"
+            value={events.joinRate === undefined ? '-' : `${events.joinRate} %`}
+            foot={events.audience === undefined ? undefined : `${basis} ÷ พนักงาน ${num(events.audience)} คน`}
+          />
+          <MiniStat
+            icon={Icon.Warning}
+            label="ไม่เข้าร่วม"
+            value={events.noShowRate === undefined ? '-' : `${events.noShowRate} %`}
+            foot={events.audience === undefined ? undefined : `ส่วนที่เหลือจากพนักงาน ${num(events.audience)} คน`}
+            tone="text-gold"
+          />
         </div>
 
         <div className="mt-4 grid gap-4 xl:grid-cols-2">
           <Panel
             title="แนวโน้มอัตราการเข้าร่วมกิจกรรม"
-            hint="อัตราเข้าร่วม (รายเดือน) = (จำนวนผู้เข้าร่วมเฉลี่ยต่อกิจกรรมในเดือนนั้น / จำนวนพนักงานทั้งหมด) × 100"
+            hint={
+              oneEvent
+                ? 'เลือกกิจกรรมเดียว = (ผู้เข้าร่วมกิจกรรมนั้น / จำนวนพนักงานทั้งหมด) × 100 เห็นจุดเดียวที่เดือนที่จัดงาน'
+                : 'อัตราเข้าร่วม (รายเดือน) = (จำนวนผู้เข้าร่วมเฉลี่ยต่อกิจกรรมในเดือนนั้น / จำนวนพนักงานทั้งหมด) × 100'
+            }
           >
             <LineChart
               data={data.attendanceTrend.map((row) => ({
@@ -436,7 +563,11 @@ function AnalyticsTab() {
 
           <Panel
             title="อัตราการมีส่วนร่วมตามแผนก"
-            hint="อัตราการมีส่วนร่วมเฉลี่ยตามแผนก = (จำนวนผู้เข้าร่วมเฉลี่ยต่อกิจกรรมของแผนก / จำนวนพนักงานทั้งหมดในแผนก) × 100"
+            hint={
+              oneEvent
+                ? 'เลือกกิจกรรมเดียว = (คนในแผนกที่มากิจกรรมนั้น / จำนวนพนักงานทั้งหมดในแผนก) × 100'
+                : 'อัตราการมีส่วนร่วมเฉลี่ยตามแผนก = (จำนวนผู้เข้าร่วมเฉลี่ยต่อกิจกรรมของแผนก / จำนวนพนักงานทั้งหมดในแผนก) × 100'
+            }
           >
             {data.departments.length === 0 ? (
               <p className="py-10 text-center text-sm text-muted">ยังไม่มีข้อมูลแผนก</p>
@@ -480,22 +611,29 @@ function AnalyticsTab() {
         <div className="grid gap-4 xl:grid-cols-2">
           <Panel
             title="การเคลื่อนไหวของคะแนน"
-            hint="เส้น = คะแนนที่แจก + คะแนนที่ใช้"
-            action={
-              <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs text-muted">
-                {/* whitespace-nowrap กันไม่ให้ชื่อแต่ละอันถูกตัดกลางคำตอนการ์ดแคบ */}
-                <span className="flex items-center gap-1 whitespace-nowrap">
-                  <span className="h-2.5 w-2.5 rounded-sm bg-[#1FC2A0]" /> คะแนนที่แจก
-                </span>
-                <span className="flex items-center gap-1 whitespace-nowrap">
-                  <span className="h-2.5 w-2.5 rounded-sm bg-[#3B6DF5]" /> คะแนนที่ใช้
-                </span>
-                <span className="flex items-center gap-1 whitespace-nowrap">
-                  <span className="h-0.5 w-4 rounded-full bg-primary" /> เคลื่อนไหวรวม
-                </span>
-              </span>
+            /* เงื่อนไขนี้เคยอ้าง filters.eventPoints ซึ่งถูกยุบรวมเป็น filters.event ไปแล้ว
+               ค่าที่อ่านได้จึงเป็น undefined ตลอด และการ์ดขึ้นคำอธิบายของโหมดกิจกรรมเดียวทุกครั้ง
+               แม้กำลังดูทุกกิจกรรมอยู่ */
+            hint={
+              oneEvent
+                ? 'เห็นเฉพาะคะแนนที่กิจกรรมนี้แจก · แท่งคะแนนที่ใช้ไปเป็นศูนย์เสมอ เพราะการแลกของรางวัลไม่ได้ผูกกับกิจกรรมใดกิจกรรมหนึ่ง'
+                : 'แท่ง = คะแนนที่แจกและที่ใช้ในเดือนนั้น · เส้น = ยอดสะสมรวม ซึ่งเริ่มจากยอดยกมาก่อนช่วงที่เลือก จึงไม่ได้เริ่มที่ศูนย์'
             }
           >
+            {/* คำอธิบายสีย้ายลงมาใต้ช่องเลือกกิจกรรม หัวการ์ดจะได้ไม่แน่นเกินไป
+                whitespace-nowrap กันไม่ให้ชื่อแต่ละอันถูกตัดกลางคำตอนการ์ดแคบ */}
+            <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs text-muted">
+              <span className="flex items-center gap-1 whitespace-nowrap">
+                <span className="h-2.5 w-2.5 rounded-sm bg-[#1FC2A0]" /> คะแนนที่แจก
+              </span>
+              <span className="flex items-center gap-1 whitespace-nowrap">
+                <span className="h-2.5 w-2.5 rounded-sm bg-[#3B6DF5]" /> คะแนนที่ใช้
+              </span>
+              <span className="flex items-center gap-1 whitespace-nowrap">
+                <span className="h-0.5 w-4 rounded-full bg-primary" /> เคลื่อนไหวรวม
+              </span>
+            </div>
+
             <PointsChart
               data={data.pointTrend.map((row) => ({
                 label: monthLabel(row.month),
@@ -507,6 +645,7 @@ function AnalyticsTab() {
             />
           </Panel>
 
+          {!oneEvent && (
           <Panel title="ภาพรวมคะแนน">
             <div className="grid gap-3 sm:grid-cols-2">
               <MiniStat icon={Icon.Wallet} label="คะแนนที่แจก" value={num(points.given)} surface="bg-primary-wash/50" />
@@ -524,10 +663,14 @@ function AnalyticsTab() {
               คะแนนหมดอายุจะเริ่มนับหลังการตัดยอดประจำปีครั้งแรก
             </p>
           </Panel>
+          )}
         </div>
       </section>
 
-      {/* 3. การวิเคราะห์ของรางวัล */}
+      {/* 3. การวิเคราะห์ของรางวัล
+          ซ่อนตอนเลือกกิจกรรมเดียว เพราะการแลกของรางวัลไม่ได้เกิดจากกิจกรรมใดกิจกรรมหนึ่ง
+          ถ้าปล่อยให้แสดงต่อ ตัวเลขของทั้งระบบจะปนอยู่กับตัวเลขของงานเดียวแล้วอ่านรวมกันผิด */}
+      {!oneEvent && (
       <section>
         <h2 className="mb-3 border-l-4 border-primary pl-2 font-bold text-ink">3. การวิเคราะห์ของรางวัล</h2>
 
@@ -575,6 +718,7 @@ function AnalyticsTab() {
           </Panel>
         </div>
       </section>
+      )}
 
       <FrequencyPeople bucket={bucket} filters={filters} onClose={() => setBucket(null)} />
     </div>

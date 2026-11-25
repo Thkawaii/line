@@ -42,6 +42,18 @@ var retention = map[string]struct {
 
 const lastResetKey = "points_reset_last_year"
 
+/*
+lastResetAtKey เก็บ "เวลาที่ตัดยอดจริง" ไม่ใช่แค่ปี
+
+ปีอย่างเดียวบอกไม่ได้ว่ารอบปัจจุบันเริ่มนับเมื่อไหร่ ถ้าผู้ดูแลกดตัดยอดเองกลางปี
+รอบใหม่เริ่มนับจากวันนั้น ไม่ใช่จากวันตัดยอดตามปฏิทินของปีก่อน
+
+เดิมใช้ resetDate(ปีนี้ - 1) เป็นจุดเริ่มรอบเสมอ คนที่ได้คะแนนเยอะก่อนถูกตัดยอด
+จึงยังถูกนับว่า "ได้คะแนนในรอบนี้" ทั้งที่คะแนนก้อนนั้นถูกล้างไปแล้ว
+ผลคือจำนวนคนเสี่ยงถูกลดระดับขึ้นเป็น 0 ทั้งที่ความจริงรอบใหม่ยังไม่มีใครได้คะแนนเลย
+*/
+const lastResetAtKey = "points_reset_last_at"
+
 // AnnualResetSummary สรุปผลการรีเซ็ตเพื่อแสดงให้ผู้ดูแลระบบเห็น
 type AnnualResetSummary struct {
 	Total    int `json:"total"`
@@ -64,8 +76,9 @@ func RunAnnualReset(actorID int64, cycleStart time.Time) (AnnualResetSummary, er
 	defer tx.Rollback()
 
 	// คะแนนที่ได้รับตลอดรอบปี นับจากรายการที่เพิ่มคะแนนทั้งหมด
+	// ดึงยอดคะแนนคงเหลือมาด้วย เพื่อบันทึกจำนวนที่ถูกตัดจริงลงรายการเดินคะแนน
 	people, err := tx.Query(`
-		SELECT u.id, u.tier,
+		SELECT u.id, u.tier, u.points,
 		       COALESCE((SELECT sum(t.points) FROM point_transactions t
 		                 WHERE t.user_id = u.id AND t.points > 0 AND t.created_at >= $1), 0)::int AS earned
 		FROM users u WHERE u.role = 'user'`, cycleStart)
@@ -74,17 +87,18 @@ func RunAnnualReset(actorID int64, cycleStart time.Time) (AnnualResetSummary, er
 	}
 
 	type change struct {
-		id     int64
-		tier   string
-		demote bool
+		id      int64
+		tier    string
+		demote  bool
+		balance int // ยอดคงเหลือก่อนถูกตัด ใช้บันทึกเป็นรายการติดลบ
 	}
 	var changes []change
 
 	for people.Next() {
 		var id int64
 		var tier string
-		var earned int
-		if err := people.Scan(&id, &tier, &earned); err != nil {
+		var balance, earned int
+		if err := people.Scan(&id, &tier, &balance, &earned); err != nil {
 			people.Close()
 			return summary, err
 		}
@@ -95,7 +109,7 @@ func RunAnnualReset(actorID int64, cycleStart time.Time) (AnnualResetSummary, er
 			next = rule.fallback
 		}
 
-		changes = append(changes, change{id: id, tier: next, demote: next != tier})
+		changes = append(changes, change{id: id, tier: next, demote: next != tier, balance: balance})
 	}
 	people.Close()
 
@@ -110,9 +124,23 @@ func RunAnnualReset(actorID int64, cycleStart time.Time) (AnnualResetSummary, er
 		if c.demote {
 			title += " และปรับระดับเป็น " + c.tier
 		}
+
+		/*
+			บันทึกจำนวนที่ถูกตัดจริง ไม่ใช่ 0
+
+			เดิมลงรายการไว้ด้วยคะแนน 0 คือมีบรรทัดบอกว่า "ตัดยอดแล้ว"
+			แต่ไม่มีตัวเลขว่าตัดไปเท่าไหร่ ผลคือผลรวมของรายการเดินคะแนน
+			ไม่เท่ากับยอดคงเหลือจริงอีกต่อไป
+
+			กราฟการเคลื่อนไหวของคะแนนคิดยอดยกมาจากผลรวมนั้น เส้นยอดสะสม
+			จึงเริ่มต้นสูงเกินจริงทุกปีหลังตัดยอด และยิ่งห่างขึ้นเรื่อย ๆ ทุกรอบ
+
+			คนที่เปิดดูประวัติคะแนนของตัวเองก็จะเห็นว่าคะแนนหายไปเฉย ๆ
+			โดยไม่มีรายการอธิบาย
+		*/
 		if _, err := tx.Exec(`
 			INSERT INTO point_transactions (user_id, kind, source, title, points)
-			VALUES ($1,'adjust','system',$2,0)`, c.id, title); err != nil {
+			VALUES ($1,'adjust','system',$2,$3)`, c.id, title, -c.balance); err != nil {
 			return summary, err
 		}
 		if _, err := tx.Exec(`
@@ -135,6 +163,14 @@ func RunAnnualReset(actorID int64, cycleStart time.Time) (AnnualResetSummary, er
 		INSERT INTO settings (key, value, label, kind) VALUES ($1,$2,'ปีที่ตัดยอดคะแนนล่าสุด','number')
 		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
 		lastResetKey, strconv.Itoa(summary.Year)); err != nil {
+		return summary, err
+	}
+
+	// จำเวลาที่ตัดยอดจริงด้วย ใช้เป็นจุดเริ่มของรอบถัดไป
+	if _, err := tx.Exec(`
+		INSERT INTO settings (key, value, label, kind) VALUES ($1,$2,'เวลาที่ตัดยอดคะแนนล่าสุด','text')
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+		lastResetAtKey, time.Now().Format(time.RFC3339)); err != nil {
 		return summary, err
 	}
 
@@ -175,6 +211,35 @@ func resetDate(year int) time.Time {
 	return time.Date(year, time.Month(month), day, 0, 0, 0, 0, time.Local)
 }
 
+/*
+cycleStart คืนวันที่รอบปีปัจจุบันเริ่มนับคะแนน
+
+ปกติคือวันตัดยอดตามปฏิทินของปีก่อน แต่ถ้าเคยตัดยอดจริงหลังจากวันนั้น
+(ผู้ดูแลกดเองกลางปี หรือตัวตั้งเวลาทำช้ากว่ากำหนด) ให้ใช้เวลาที่ตัดจริงแทน
+
+ไม่งั้นคะแนนที่ได้ก่อนถูกตัดยอดจะถูกนับซ้ำเข้ารอบใหม่ ทั้งที่ถูกล้างไปแล้ว
+*/
+func cycleStart() time.Time {
+	start := resetDate(time.Now().Year() - 1)
+
+	last, err := time.Parse(time.RFC3339, setting(lastResetAtKey, ""))
+	if err == nil && last.After(start) {
+		return last
+	}
+	return start
+}
+
+/*
+resetDone บอกว่ารอบของวันตัดยอดที่ส่งมาถูกตัดไปแล้วหรือยัง
+
+ดูจากปีที่บันทึกไว้ ไม่ใช่จากวันที่ปัจจุบัน เพราะผู้ดูแลกดตัดยอดก่อนกำหนดได้
+พอกดแล้ว วันตัดยอดของปีนั้นถือว่าผ่านไปแล้ว ไม่ใช่ "กำลังจะถึง"
+*/
+func resetDone(year int) bool {
+	last, _ := strconv.Atoi(setting(lastResetKey, "0"))
+	return last >= year
+}
+
 func settingInt(key string, fallback, min, max int) int {
 	value, err := strconv.Atoi(setting(key, ""))
 	if err != nil || value < min || value > max {
@@ -193,13 +258,12 @@ func MaybeRunAnnualReset() (AnnualResetSummary, error) {
 		return AnnualResetSummary{}, nil
 	}
 
-	last, _ := strconv.Atoi(setting(lastResetKey, "0"))
-	if last >= now.Year() {
+	if resetDone(now.Year()) {
 		return AnnualResetSummary{}, nil
 	}
 
-	// รอบที่ผ่านมาเริ่มตั้งแต่วันตัดยอดของปีก่อน
-	return RunAnnualReset(0, resetDate(now.Year()-1))
+	// รอบที่ผ่านมาเริ่มตั้งแต่วันตัดยอดของปีก่อน หรือเวลาที่ตัดยอดจริงถ้ามาทีหลัง
+	return RunAnnualReset(0, cycleStart())
 }
 
 /* ---------- เส้นทางสำหรับผู้ดูแลระบบ ---------- */
@@ -209,20 +273,20 @@ func AdminAnnualReset(w http.ResponseWriter, r *http.Request) {
 	claims := middleware.CurrentUser(r)
 
 	/*
-		ใช้สิทธิ์ชุดเดียวกับการปรับคะแนน
+		ใช้กติกาเดิมของการปรับคะแนน คือแผนกหลังบ้าน + ตำแหน่งในรายการ
 
 		การตัดยอดกระทบคะแนนและระดับของทุกคนในระบบพร้อมกันและย้อนกลับไม่ได้
-		จึงไม่ควรเปิดกว้างกว่าการปรับคะแนนของคนเดียว
+		จึงไม่เปิดกว้างตามการปรับคะแนนรายคนที่ย้ายไปใช้ระบบขออนุมัติแล้ว
 		ซ่อนปุ่มที่หน้าจอเป็นแค่ความสุภาพกับสายตา ของจริงกันตรงนี้
 	*/
-	if !CanAdjustPoints(claims) {
+	if !CanRunAnnualReset(claims) {
 		web.Error(w, http.StatusForbidden,
 			"บัญชีนี้ไม่มีสิทธิ์ตัดยอดคะแนนประจำปี")
 		return
 	}
 
-	// นับรอบปีที่ผ่านมาจากวันตัดยอดของปีก่อน เหมือนกับที่ตัวตั้งเวลาใช้
-	summary, err := RunAnnualReset(claims.ID, resetDate(time.Now().Year()-1))
+	// นับรอบปีที่ผ่านมาจากวันที่รอบนี้เริ่มจริง เหมือนกับที่ตัวตั้งเวลาใช้
+	summary, err := RunAnnualReset(claims.ID, cycleStart())
 	if err != nil {
 		web.Fail(w, err)
 		return
@@ -236,7 +300,12 @@ func AdminAnnualReset(w http.ResponseWriter, r *http.Request) {
 // AdminResetStatus บอกว่าถึงกำหนดตัดยอดเมื่อไหร่ และทำไปล่าสุดเมื่อปีไหน
 func AdminResetStatus(w http.ResponseWriter, r *http.Request) {
 	last, _ := strconv.Atoi(setting(lastResetKey, "0"))
-	due := resetDate(time.Now().Year())
+
+	// ใช้ตัวเดียวกับที่แสดงวันหมดอายุให้พนักงาน สองหน้าจะได้ไม่บอกคนละวัน
+	due := NextResetDate()
+
+	// นับจากวันที่รอบนี้เริ่มจริง ไม่ใช่วันตัดยอดตามปฏิทินของปีก่อนเสมอไป
+	start := cycleStart()
 
 	pending, err := store.Count(`
 		SELECT count(*)::int FROM users u
@@ -244,7 +313,7 @@ func AdminResetStatus(w http.ResponseWriter, r *http.Request) {
 		  AND COALESCE((SELECT sum(t.points) FROM point_transactions t
 		                WHERE t.user_id = u.id AND t.points > 0 AND t.created_at >= $1), 0)
 		      < CASE u.tier WHEN 'Silver' THEN 500 WHEN 'Elite' THEN 1000 ELSE 0 END`,
-		resetDate(time.Now().Year()-1))
+		start)
 	if err != nil && err != sql.ErrNoRows {
 		web.Fail(w, err)
 		return
@@ -254,6 +323,8 @@ func AdminResetStatus(w http.ResponseWriter, r *http.Request) {
 		"nextResetAt":   due.Format("2006-01-02"),
 		"lastResetYear": last,
 		"atRisk":        pending,
+		// บอกไปด้วยว่านับคะแนนตั้งแต่เมื่อไหร่ หน้าจอจะได้อธิบายเลขให้ผู้ดูแลเข้าใจ
+		"cycleStart": start.Format("2006-01-02"),
 	})
 }
 
@@ -270,8 +341,18 @@ NextResetDate คืนวันตัดยอดคะแนนครั้ง
 func NextResetDate() time.Time {
 	now := time.Now()
 
+	/*
+		ข้ามไปปีหน้าในสองกรณี ไม่ใช่กรณีเดียว
+
+		หนึ่ง เลยวันตัดยอดของปีนี้มาแล้ว
+		สอง ยังไม่ถึงวันตามปฏิทิน แต่ตัดยอดของปีนี้ไปเรียบร้อยแล้ว
+		     (ผู้ดูแลกดเองก่อนกำหนด)
+
+		เดิมดูแต่ข้อแรก พอกดตัดยอดเองกลางปี หน้าจอจึงยังขึ้นวันของปีนี้
+		ทั้งที่รอบนั้นจบไปแล้ว และตัวตั้งเวลาก็จะไม่มาตัดซ้ำอีกในปีเดียวกัน
+	*/
 	due := resetDate(now.Year())
-	if now.Before(due) {
+	if now.Before(due) && !resetDone(now.Year()) {
 		return due
 	}
 	return resetDate(now.Year() + 1)

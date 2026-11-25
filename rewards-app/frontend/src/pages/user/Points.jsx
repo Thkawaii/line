@@ -7,7 +7,7 @@ import { Icon } from '../../components/icons';
 import { clockTime, groupByDay, num, signedPoints, thaiDate } from '../../lib/format';
 import { tierCard, tierIcon } from '../../lib/tier';
 import { useLanguage, useT } from '../../lib/i18n';
-import { SpecialPointIcon } from '../../components/SpecialPoints';
+import { SpecialExpiryNote, SpecialPointIcon } from '../../components/SpecialPoints';
 
 const SOURCE_ICON = {
   vote: Icon.Vote,
@@ -107,12 +107,18 @@ export function PointsPage() {
           {/* คะแนนพิเศษ — วางเป็นบรรทัดเดียวบนพื้นการ์ดเดิม ไม่ใส่กล่องพื้นหลังทับ
               เพราะกล่องสีอ่อนบนการ์ดสีเข้มจะกลายเป็นแถบเทาที่แย่งสายตาจากคะแนนหลัก
               คั่นด้วยเส้นบาง ๆ แทน บอกได้ว่าเป็นคนละกระเป๋าโดยไม่ตัดการ์ดเป็นสองท่อน */}
-          <div className={`mt-4 flex items-center justify-center gap-2 border-t pt-4 ${theme.divider}`}>
-            <SpecialPointIcon size={26} />
-            <span className={`text-xl font-bold leading-none ${theme.value}`}>
-              {num(user.special_points || 0)}
-            </span>
-            <span className={`text-sm ${theme.muted}`}>{t('points.special')}</span>
+          <div className={`mt-4 border-t pt-4 ${theme.divider}`}>
+            <div className="flex items-center justify-center gap-2">
+              <SpecialPointIcon size={26} />
+              <span className={`text-xl font-bold leading-none ${theme.value}`}>
+                {num(user.special_points || 0)}
+              </span>
+              <span className={`text-sm ${theme.muted}`}>{t('points.special')}</span>
+            </div>
+
+            {/* คะแนนพิเศษหมดอายุแล้วถูกตัดเหลือ 0 ทั้งก้อน จึงต้องบอกวันหมดอายุไว้ตรงนี้เสมอ
+                ไม่ใช่ปล่อยให้รู้ตัวอีกทีตอนยอดกลายเป็นศูนย์ */}
+            <SpecialExpiryNote user={user} theme={theme} />
           </div>
         </section>
 

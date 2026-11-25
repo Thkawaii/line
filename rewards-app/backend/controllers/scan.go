@@ -32,9 +32,9 @@ import (
 เส้นทางนี้จึงรับรหัสอะไรก็ได้แล้วแยกแยะให้เอง แล้วบอกกลับไปว่าเจออะไร
 หน้าจอค่อยแสดงผลให้เหมาะกับสิ่งที่เจอ
 
-	QR ประจำตัว  : "<userID>.<หมดอายุ>.<ลายเซ็น>"  มีอายุสั้นและเซ็นกำกับ
-	QR ของรางวัล : รหัสอ้างอิง เช่น RW-261103-7A13E1
-	พิมพ์มือ     : รหัสพนักงาน
+	QR ประจำตัว  : "<userID>.<หมดอายุ>.<ลายเซ็น>"           มีอายุสั้นและเซ็นกำกับ
+	QR ของรางวัล : "RD.<redemptionID>.<หมดอายุ>.<ลายเซ็น>"  มีอายุสั้นและเซ็นกำกับ
+	พิมพ์มือ     : รหัสพนักงาน หรือรหัสอ้างอิง เช่น RW-261103-7A13E1
 */
 
 // resolveScan แปลงรหัสที่สแกนได้เป็นพนักงานหรือรายการแลกของรางวัล
@@ -43,6 +43,30 @@ func resolveScan(code string) (kind string, userID int64, refCode string, proble
 	code = strings.TrimSpace(code)
 	if code == "" {
 		return "", 0, "", "ยังไม่ได้รับรหัส"
+	}
+
+	/*
+		QR ของรางวัล มีสี่ส่วนและขึ้นต้นด้วย RD
+
+		ตรวจก่อน QR ประจำตัวเพราะแยกกันที่จำนวนส่วน ถ้าปล่อยให้ตกไปทางล่าง
+		จะถูกอ่านเป็นรหัสพนักงานที่พิมพ์มือแล้วหาไม่เจอ
+	*/
+	if id, problem, matched := parseRedemptionToken(code); matched {
+		if problem != "" {
+			return "", 0, "", problem
+		}
+
+		// แปลงกลับเป็นรหัสอ้างอิง ขั้นตอนหลังจากนี้จะได้เหมือนกับการพิมพ์รหัสเอง
+		var refCode string
+		err := config.DB.QueryRow(
+			`SELECT ref_code FROM redemptions WHERE id = $1`, id).Scan(&refCode)
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", 0, "", "ไม่พบรายการแลกของรางวัลนี้"
+		}
+		if err != nil {
+			return "", 0, "", "อ่านรหัสไม่สำเร็จ"
+		}
+		return "redemption", 0, refCode, ""
 	}
 
 	// QR ประจำตัวพนักงาน มีสามส่วนคั่นด้วยจุด
@@ -250,8 +274,8 @@ func checkInScanned(w http.ResponseWriter, actorID, eventID, userID int64, user 
 			return
 		}
 		if _, err := tx.Exec(`
-			INSERT INTO point_transactions (user_id, kind, source, title, points)
-			VALUES ($1,'earn','event',$2,$3)`, userID, "เข้าร่วม "+title, awarded); err != nil {
+			INSERT INTO point_transactions (user_id, kind, source, title, points, event_id)
+			VALUES ($1,'earn','event',$2,$3,$4)`, userID, "เข้าร่วม "+title, awarded, eventID); err != nil {
 			web.Fail(w, err)
 			return
 		}
@@ -269,7 +293,7 @@ func checkInScanned(w http.ResponseWriter, actorID, eventID, userID int64, user 
 	}
 
 	// คะแนนพิเศษจ่ายแยก และจ่ายแม้กิจกรรมจะไม่ได้ตั้งคะแนนปกติไว้
-	if err := awardSpecialPoints(tx, userID, specialPoints, "เข้าร่วม "+title, specialExpire); err != nil {
+	if err := awardSpecialPoints(tx, userID, specialPoints, "เข้าร่วม "+title, specialExpire, eventID, nil); err != nil {
 		web.Fail(w, err)
 		return
 	}

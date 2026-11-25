@@ -27,6 +27,17 @@ type analyticsFilter struct {
 	until      time.Time // วันถัดจากวันสุดท้ายที่นับ ใช้เทียบแบบ < จะได้ไม่ต้องคิดเรื่องเวลาในวัน
 	department string
 	tier       string
+
+	/*
+		กิจกรรมที่เลือกดูเจาะจง 0 คือดูทุกกิจกรรม
+
+		อยู่บนแถบตัวกรองรวมแถวเดียวกับช่วงวันที่ แผนก และระดับสมาชิก
+		เลือกแล้วมีผลกับทุกบล็อกที่ผูกกับกิจกรรมได้ ไม่ใช่เฉพาะกราฟใดกราฟหนึ่ง
+
+		บล็อกที่ผูกกับกิจกรรมไม่ได้ (ของรางวัล, ภาพรวมคะแนนรวม) ไม่มีทางกรองให้ถูกต้อง
+		ฝั่งหน้าเว็บจึงซ่อนไว้ตอนเลือกกิจกรรม ดีกว่าโชว์ตัวเลขที่ไม่เกี่ยวกับงานที่เลือก
+	*/
+	event int64
 }
 
 /*
@@ -62,7 +73,49 @@ func readFilter(r *http.Request) analyticsFilter {
 		until:      until,
 		department: web.Param(r, "department", "all"),
 		tier:       web.Param(r, "tier", "all"),
+		event:      eventParam(r, "event"),
 	}
+}
+
+// eventParam อ่านรหัสกิจกรรมจาก query string ค่าที่อ่านไม่ออกหรือติดลบถือว่าไม่ได้เลือก
+func eventParam(r *http.Request, name string) int64 {
+	id, err := strconv.ParseInt(web.Param(r, name, ""), 10, 64)
+	if err != nil || id < 0 {
+		return 0
+	}
+	return id
+}
+
+/*
+eventClause กรองให้เหลือกิจกรรมเดียว
+
+column คือคอลัมน์ที่เก็บรหัสกิจกรรมในคิวรีนั้น ซึ่งคนละชื่อกันในแต่ละกราฟ
+(e.id สำหรับตารางกิจกรรม, t.event_id สำหรับรายการเดินคะแนน)
+*/
+func (f analyticsFilter) eventClause(column string, event int64, args *[]any) string {
+	if event <= 0 {
+		return ""
+	}
+	*args = append(*args, event)
+	return fmt.Sprintf(" AND %s = $%d", column, len(*args))
+}
+
+/*
+eventOptions คือรายการกิจกรรมให้เลือกในช่องกรอง
+
+ต้องสร้างจากช่วงเวลาที่เลือกอยู่ ไม่ใช่ดึงกิจกรรมทั้งหมดมาเสมอ
+เพราะแต่ละปีมีกิจกรรมคนละชุด ถ้าโชว์ทั้งหมดผู้ดูแลจะเลือกงานของปี 2568
+ตอนที่กำลังดูข้อมูลปี 2569 แล้วได้กราฟว่างเปล่าโดยไม่รู้ว่าทำไม
+
+ติดปีไว้ท้ายชื่อด้วย กิจกรรมประจำปีที่ชื่อซ้ำกันทุกปีจะได้แยกออกจากกัน
+*/
+func eventOptions(f analyticsFilter) ([]store.Row, error) {
+	return store.Query(`
+		SELECT e.id, e.title, to_char(e.event_date, 'YYYY-MM-DD') AS event_date,
+		       e.title || ' (' || (extract(year from e.event_date)::int + 543) || ')' AS label
+		FROM events e
+		WHERE e.event_date >= $1 AND e.event_date < $2`+publishedEvents+`
+		ORDER BY e.event_date DESC, e.id DESC`, f.since, f.until)
 }
 
 func intParam(r *http.Request, name string, fallback, min, max int) int {
@@ -88,6 +141,90 @@ func (f analyticsFilter) userClause(alias string, args *[]any) string {
 	return clause
 }
 
+/*
+eventSummary สรุปตัวเลขของกิจกรรมเดียวที่เลือกอยู่
+
+มีไว้ตอบคำถามที่ถามกันบ่อยที่สุดตรง ๆ
+"เดือนนี้จัดหลายงาน งานนี้งานเดียวแจกไปกี่คะแนน และมีคนมากี่คน"
+
+กราฟแนวโน้มตอบคำถามนี้ได้ไม่ดี เพราะพอเลือกเดือนเดียวกับงานเดียว
+เส้นกราฟจะเหลือจุดเดียวและแท่งเดียว ซึ่งอ่านตัวเลขจริงได้ยากกว่าดูตัวเลขตรง ๆ
+
+คืน nil เมื่อไม่ได้เลือกกิจกรรม หน้าเว็บจะได้ไม่ต้องวาดแถบนี้
+*/
+func eventSummary(f analyticsFilter, eventID int64) (web.Map, error) {
+	if eventID <= 0 {
+		return nil, nil
+	}
+
+	event, err := store.QueryOne(`
+		SELECT e.id, e.title, e.points, e.special_points, e.status,
+		       to_char(e.event_date, 'YYYY-MM-DD') AS event_date,
+		       to_char(e.end_date,   'YYYY-MM-DD') AS end_date
+		FROM events e WHERE e.id = $1`, eventID)
+	if err != nil || event == nil {
+		return nil, err
+	}
+
+	// ตัวหารเดียวกับทุกบล็อกในหน้านี้ เปอร์เซ็นต์จะได้เทียบกันได้
+	audience, err := activeAudience(f)
+	if err != nil {
+		return nil, err
+	}
+
+	joinArgs := []any{eventID}
+	people, err := store.QueryOne(`
+		SELECT count(*)::int AS registered,
+		       count(*) FILTER (WHERE r.status = 'attended')::int AS attended,
+		       count(*) FILTER (WHERE r.status = 'absent')::int   AS no_show
+		FROM event_registrations r
+		JOIN users u ON u.id = r.user_id
+		WHERE r.event_id = $1`+f.userClause("u", &joinArgs), joinArgs...)
+	if err != nil {
+		return nil, err
+	}
+
+	/*
+		คะแนนที่แจกไปจริง อ่านจากรายการเดินคะแนน ไม่ใช่เอาคะแนนต่อหัวคูณจำนวนคน
+
+		สองอย่างนี้ไม่เท่ากันเสมอไป กิจกรรมอาจถูกแก้คะแนนกลางทาง
+		หรือมีคนได้คะแนนจากการสแกนย้อนหลังหลังปิดงานไปแล้ว
+		ตัวเลขที่ผู้ดูแลต้องใช้คือคะแนนที่ออกจากระบบไปจริง
+	*/
+	givenArgs := []any{eventID}
+	given, err := store.QueryOne(`
+		SELECT COALESCE(sum(t.points) FILTER (WHERE t.point_kind <> 'special'),0)::int AS points,
+		       COALESCE(sum(t.points) FILTER (WHERE t.point_kind =  'special'),0)::int AS special_points,
+		       count(DISTINCT t.user_id)::int AS people
+		FROM point_transactions t
+		JOIN users u ON u.id = t.user_id
+		WHERE t.event_id = $1 AND t.points > 0`+f.userClause("u", &givenArgs), givenArgs...)
+	if err != nil {
+		return nil, err
+	}
+
+	attended, _ := toInt64(people["attended"])
+
+	return web.Map{
+		"event":      event,
+		"audience":   audience,
+		"registered": people["registered"],
+		"attended":   people["attended"],
+		"noShow":     people["no_show"],
+		/*
+			อัตราเข้าร่วมคิดแบบเดียวกับการ์ดด้านบนและกราฟแนวโน้ม
+			คือ "คนที่มาจริง หารด้วยพนักงานทั้งหมดในขอบเขต"
+
+			เดิมตรงนี้หารจากจำนวนคนที่ลงทะเบียน ซึ่งเป็นนิยามที่สี่ในหน้าเดียวกัน
+			ตัวเลขจึงไม่มีทางตรงกับที่อื่นเลย
+		*/
+		"rate":          round2(float64(attended) / float64(audience) * 100),
+		"points":        given["points"],
+		"specialPoints": given["special_points"],
+		"paidPeople":    given["people"],
+	}, nil
+}
+
 func AdminAnalytics(w http.ResponseWriter, r *http.Request) {
 	f := readFilter(r)
 
@@ -108,6 +245,8 @@ func AdminAnalytics(w http.ResponseWriter, r *http.Request) {
 		{"pointTrend", func() (any, error) { return pointTrend(f) }},
 		{"rewardSplit", func() (any, error) { return rewardSplit(f) }},
 		{"topRewards", func() (any, error) { return topRewards(f) }},
+		{"eventOptions", func() (any, error) { return eventOptions(f) }},
+		{"eventSummary", func() (any, error) { return eventSummary(f, f.event) }},
 	}
 
 	for _, b := range blocks {
@@ -149,35 +288,149 @@ publishedEvents คือเงื่อนไขว่ากิจกรรม�
 */
 const publishedEvents = ` AND e.status <> 'draft'`
 
+/*
+eventStats ตัวเลขรวมของกิจกรรมในช่วงที่เลือก
+
+ยึด "วันจัดงาน" เป็นตัวกรองช่วงเวลา ไม่ใช่วันที่กดลงทะเบียน
+เพราะคนถามว่า "เดือนนี้กิจกรรมเป็นยังไง" หมายถึงงานที่จัดเดือนนี้
+ไม่ใช่งานเดือนหน้าที่บังเอิญมีคนกดลงทะเบียนไว้เดือนนี้
+
+เดิมบล็อกนี้กรองจากวันลงทะเบียน ส่วนกราฟแนวโน้มกรองจากวันจัดงาน
+สองตัวเลขในหน้าเดียวกันจึงนับคนละชุดและไม่มีทางตรงกัน
+
+คืนสองอัตราที่คนละความหมายกัน และตั้งชื่อให้ต่างกันชัด ๆ
+
+	audience     จำนวนพนักงานทั้งหมดในขอบเขตของตัวกรอง = ตัวหารของทั้งหน้า
+	joinRate     เฉลี่ยคนเข้าร่วมต่อหนึ่งกิจกรรม / พนักงานทั้งหมด
+	noShowRate   ส่วนที่เหลือจาก 100% คือสัดส่วนพนักงานที่ไม่ได้มา
+
+ส่งตัวหารออกไปแสดงบนหน้าจอด้วย ผู้ดูแลจะได้ตรวจทานเลขเปอร์เซ็นต์เองได้
+ตัวเลขที่ตรวจทานไม่ได้คือตัวเลขที่ต้องเชื่อทั้งดุ้น ซึ่งพอผิดขึ้นมาก็ไม่มีใครจับได้
+*/
 func eventStats(f analyticsFilter) (web.Map, error) {
+	audience, err := activeAudience(f)
+	if err != nil {
+		return nil, err
+	}
+
 	args := []any{f.since, f.until}
 	clause := f.userClause("u", &args)
 
+	/*
+		ตัวกรองกิจกรรมต้องมีตรงนี้ด้วย
+
+		บล็อกนี้คือการ์ดสี่ใบหัวหน้าจอ ซึ่งเป็นตัวเลขที่คนอ่านก่อนเพื่อน
+		ของเดิมไม่ได้ใส่เงื่อนไขกิจกรรมไว้ เลือกกิจกรรมเดียวแล้วกราฟข้างล่างเปลี่ยน
+		แต่การ์ดสี่ใบยังเป็นของทั้งช่วงอยู่ กลายเป็นตัวเลขสองชุดบนหน้าจอเดียวกัน
+		ที่นับคนละขอบเขตโดยไม่มีอะไรบอก
+	*/
+	clause += f.eventClause("e.id", f.event, &args)
+
+	/*
+		นับ "เฉลี่ยต่อหนึ่งกิจกรรม" ไม่ใช่ผลรวมของทุกกิจกรรม
+
+		เดิมเอาจำนวนการเข้าร่วมทั้งหมดในช่วงมาหารด้วยจำนวนพนักงาน
+		เดือนที่จัดสามงานแล้วคนเดิมไปครบทั้งสามงาน จะถูกนับเป็นสามครั้ง
+		อัตราจึงทะลุ 100% ได้สบาย ๆ (ที่เจอจริงคือ 183.87%)
+		ซึ่งอ่านไม่ได้ความหมาย เพราะเกินจำนวนคนที่มีอยู่จริง
+
+		เฉลี่ยต่องานตอบคำถามที่คนถามจริง ๆ ว่า "จัดงานหนึ่งครั้ง คนมากี่ % ขององค์กร"
+		และใช้สูตรเดียวกับกราฟแนวโน้ม ตัวเลขสองที่จึงตรงกัน
+	*/
 	row, err := store.QueryOne(`
-		SELECT count(*)::int AS registered,
-		       count(*) FILTER (WHERE r.status = 'attended')::int AS attended
-		FROM event_registrations r
-		JOIN users u ON u.id = r.user_id
-		JOIN events e ON e.id = r.event_id
-		WHERE r.created_at >= $1 AND r.created_at < $2`+publishedEvents+clause, args...)
+		WITH per_event AS (
+		  SELECT e.id,
+		         count(r.id)::int AS registered,
+		         count(r.id) FILTER (WHERE r.status = 'attended')::int AS attended
+		  FROM events e
+		  JOIN event_registrations r ON r.event_id = e.id
+		  JOIN users u ON u.id = r.user_id
+		  WHERE e.event_date >= $1 AND e.event_date < $2`+publishedEvents+clause+`
+		  GROUP BY e.id
+		)
+		SELECT COALESCE(sum(registered), 0)::int AS registered,
+		       COALESCE(sum(attended), 0)::int   AS attended,
+		       COALESCE(avg(attended), 0)::float AS avg_attended,
+		       count(*)::int                     AS events
+		FROM per_event`, args...)
 	if err != nil {
 		return nil, err
 	}
 
 	registered := toInt(row["registered"])
 	attended := toInt(row["attended"])
+	avgAttended, _ := row["avg_attended"].(float64)
 
-	rate := 0.0
-	if registered > 0 {
-		rate = float64(attended) / float64(registered) * 100
-	}
+	/*
+		สองอัตรานี้บวกกันได้ 100% เสมอ เพราะใช้ตัวหารเดียวกันคือพนักงานทั้งหมด
 
+		เดิม "ไม่เข้าร่วม" หารด้วยจำนวนคนที่ลงทะเบียน ซึ่งเป็นคนละตัวหารกับ
+		"อัตราการเข้าร่วม" ที่หารด้วยพนักงานทั้งหมด สองเลขข้างกันจึงเทียบกันไม่ได้
+		และทำให้เกิดภาพแปลก ๆ อย่างเข้าร่วม 26.27% คู่กับไม่เข้าร่วม 0%
+		ซึ่งอ่านแล้วขัดกันเองทั้งที่แต่ละตัวถูกตามนิยามของมัน
+	*/
+	joinRate := capPercent(avgAttended / float64(audience) * 100)
+
+	/*
+		ส่งจำนวนกิจกรรมที่ถูกเฉลี่ยออกไปด้วย
+
+		ตัวหารของเปอร์เซ็นต์คือจำนวนพนักงาน แต่ตัวเศษคือ "ค่าเฉลี่ยจาก N กิจกรรม"
+		ถ้าหน้าจอไม่บอก N คนอ่านจะแยกไม่ออกว่ากำลังดูค่าเฉลี่ยของทั้งปี
+		หรือดูกิจกรรมเดียว ซึ่งเป็นสองความหมายที่ตัดสินใจต่างกันคนละเรื่อง
+		เลือกกิจกรรมเดียว N = 1 ค่าเฉลี่ยจึงเท่ากับอัตราของกิจกรรมนั้นพอดี
+	*/
 	return web.Map{
 		"registered": registered,
 		"attended":   attended,
+		"audience":   audience,
+		"events":     toInt(row["events"]),
 		"noShow":     registered - attended,
-		"rate":       round2(rate),
+		"joinRate":   round2(joinRate),
+		"noShowRate": round2(100 - joinRate),
 	}, nil
+}
+
+/*
+capPercent ไม่ให้เปอร์เซ็นต์ทะลุ 100
+
+ยังมีทางที่ตัวเศษจะมากกว่าตัวหารได้อยู่ เช่น คนที่ลาออกไปแล้ว (ไม่นับในตัวหาร)
+เคยเข้าร่วมกิจกรรมในช่วงที่กำลังดูอยู่ (นับในตัวเศษ)
+
+กรณีแบบนั้นแปลว่า "เกือบทุกคนมา" ไม่ใช่ "มามากกว่าจำนวนคนที่มี"
+แสดง 100% จึงใกล้ความจริงกว่าแสดงตัวเลขที่อ่านแล้วงง
+*/
+func capPercent(value float64) float64 {
+	if value > 100 {
+		return 100
+	}
+	if value < 0 {
+		return 0
+	}
+	return value
+}
+
+/*
+activeAudience คือตัวหารที่ทุกบล็อกในหน้านี้ใช้ร่วมกัน
+
+พนักงานที่ยังทำงานอยู่และอยู่ในขอบเขตของตัวกรองแผนก/ระดับ
+ถ้าแต่ละบล็อกไปนับตัวหารเอง เปอร์เซ็นต์ในหน้าเดียวกันจะเทียบกันไม่ได้
+
+คืนอย่างน้อย 1 เสมอ กันหารด้วยศูนย์ตอนกรองจนไม่เหลือใคร
+*/
+func activeAudience(f analyticsFilter) (int, error) {
+	args := []any{}
+	clause := f.userClause("u", &args)
+
+	count, err := store.Count(`
+		SELECT count(*) FROM users u
+		WHERE u.role = 'user' AND u.status = 'Active'`+clause, args...)
+	if err != nil {
+		return 1, err
+	}
+	if count < 1 {
+		return 1, nil
+	}
+	return int(count), nil
 }
 
 // แนวโน้มอัตราการเข้าร่วมรายเดือน
@@ -196,17 +449,17 @@ func attendanceTrend(f analyticsFilter) ([]store.Row, error) {
 
 		เติมเดือนที่ไม่มีกิจกรรมให้ครบช่วงด้วย เส้นกราฟจะได้ไม่เหลือจุดเดียว
 	*/
-	audience, err := store.Count(`
-		SELECT count(*) FROM users u WHERE u.role = 'user' AND u.status = 'Active'`)
+	audience, err := activeAudience(f)
 	if err != nil {
 		return nil, err
-	}
-	if audience < 1 {
-		audience = 1
 	}
 
 	args := []any{f.since, f.until, audience}
 	clause := f.userClause("u", &args)
+
+	// เลือกกิจกรรมเดียว เส้นกราฟจะเหลือเฉพาะเดือนที่กิจกรรมนั้นจัด
+	// เดือนอื่นยังอยู่บนแกนเวลาแต่เป็นช่องว่าง ไม่ใช่ศูนย์ จะได้ไม่อ่านเป็น "จัดแล้วไม่มีคนมา"
+	clause += f.eventClause("e.id", f.event, &args)
 
 	return store.Query(`
 		WITH months AS (
@@ -220,7 +473,9 @@ func attendanceTrend(f analyticsFilter) ([]store.Row, error) {
 		per_event AS (
 		  SELECT to_char(date_trunc('month', e.event_date), 'YYYY-MM') AS month,
 		         e.id,
-		         count(r.id)::int AS joined
+		         /* นับเฉพาะคนที่มาจริง ให้ตรงกับคำว่า "เข้าร่วม" ที่ใช้ทั้งหน้า
+		            เดิมนับทุกคนที่กดลงทะเบียน ซึ่งรวมคนที่ไม่มาด้วย */
+		         count(r.id) FILTER (WHERE r.status = 'attended')::int AS joined
 		  FROM events e
 		  LEFT JOIN event_registrations r ON r.event_id = e.id
 		  LEFT JOIN users u ON u.id = r.user_id
@@ -244,7 +499,9 @@ func attendanceTrend(f analyticsFilter) ([]store.Row, error) {
 		SELECT months.month,
 		       COALESCE(by_month.events, 0)                               AS events,
 		       COALESCE(round(by_month.avg_joined::numeric, 1), 0)::float AS avg_joined,
-		       COALESCE(round(by_month.avg_joined::numeric * 100 / $3, 1), 0)::float AS rate,
+		       /* ไม่ให้ทะลุ 100% ด้วยเหตุผลเดียวกับการ์ดสถิติ
+		          คนที่ลาออกไปแล้วไม่ถูกนับในตัวหาร แต่ยังอยู่ในประวัติการเข้าร่วม */
+		       LEAST(COALESCE(round(by_month.avg_joined::numeric * 100 / $3, 1), 0), 100)::float AS rate,
 		       (by_month.month IS NOT NULL) AS has_data
 		FROM months LEFT JOIN by_month USING (month)
 		ORDER BY months.month`, args...)
@@ -254,6 +511,7 @@ func attendanceTrend(f analyticsFilter) ([]store.Row, error) {
 func topEvents(f analyticsFilter) ([]store.Row, error) {
 	args := []any{f.since, f.until}
 	clause := f.userClause("u", &args)
+	clause += f.eventClause("e.id", f.event, &args)
 
 	/*
 		สัดส่วนที่แสดงคือ "เข้าร่วมกี่คน จากพนักงานทั้งหมดกี่คน"
@@ -266,22 +524,24 @@ func topEvents(f analyticsFilter) ([]store.Row, error) {
 		เปลี่ยนมาหารด้วยจำนวนพนักงานทั้งหมด ซึ่งเป็นตัวหารเดียวกันทุกแถว
 		อ่านแล้วเทียบกันได้จริง และตรงกับความยาวแถบ
 	*/
-	audience, err := store.Count(`
-		SELECT count(*) FROM users u WHERE u.role = 'user' AND u.status = 'Active'`)
+	audience, err := activeAudience(f)
 	if err != nil {
 		return nil, err
 	}
-	if audience < 1 {
-		audience = 1
-	}
 
+	/*
+	   ยึดวันจัดงานเหมือนบล็อกอื่น และนับเฉพาะคนที่มาจริง
+
+	   เดิมกรองจากวันที่กดลงทะเบียน งานเดือนหน้าที่เปิดรับล่วงหน้า
+	   จึงโผล่ขึ้นมาติดอันดับของเดือนนี้ ทั้งที่ยังไม่ได้จัด
+	*/
 	rows, err := store.Query(`
 		SELECT e.title, e.capacity,
-		       count(r.id)::int AS joined
+		       count(r.id) FILTER (WHERE r.status = 'attended')::int AS joined
 		FROM events e
-		JOIN event_registrations r ON r.event_id = e.id AND r.created_at >= $1 AND r.created_at < $2
+		JOIN event_registrations r ON r.event_id = e.id
 		JOIN users u ON u.id = r.user_id
-		WHERE TRUE`+publishedEvents+clause+`
+		WHERE e.event_date >= $1 AND e.event_date < $2`+publishedEvents+clause+`
 		GROUP BY e.id ORDER BY joined DESC LIMIT 5`, args...)
 	if err != nil {
 		return nil, err
@@ -300,6 +560,9 @@ func joinFrequency(f analyticsFilter) (web.Map, error) {
 	args := []any{f.since, f.until}
 	clause := f.userClause("u", &args)
 
+	// ตัวกรองกิจกรรมอยู่ในคิวรีย่อย จึงต้องแยกตัวแปรกัน ไม่ปนกับ clause ของ users
+	eventOnly := f.eventClause("e.id", f.event, &args)
+
 	rows, err := store.Query(`
 		WITH counted AS (
 		  SELECT u.id,
@@ -307,8 +570,11 @@ func joinFrequency(f analyticsFilter) (web.Map, error) {
 		         (SELECT count(*) FROM event_registrations r
 		          JOIN events e ON e.id = r.event_id
 		          WHERE r.user_id = u.id AND r.status = 'attended'
-		                AND r.created_at >= $1 AND r.created_at < $2`+publishedEvents+`) AS times
-		  FROM users u WHERE u.role = 'user'`+clause+`
+		                -- ยึดวันจัดงานเหมือนบล็อกอื่นในหน้าเดียวกัน ไม่ใช่วันที่กดลงทะเบียน
+		                AND e.event_date >= $1 AND e.event_date < $2`+publishedEvents+eventOnly+`) AS times
+		  -- ตัดคนที่ลาออกออก ใช้ตัวหารชุดเดียวกับทั้งหน้า (activeAudience)
+		  -- ไม่งั้นยอดรวมกลางโดนัทจะมากกว่าจำนวนพนักงานที่การ์ดด้านบนบอก
+		  FROM users u WHERE u.role = 'user' AND u.status = 'Active'`+clause+`
 		)
 		SELECT CASE
 		         WHEN times = 0 THEN '0'
@@ -358,10 +624,15 @@ func departmentRates(f analyticsFilter) ([]store.Row, error) {
 	args := []any{f.since, f.until}
 	clause := f.userClause("u", &args)
 
+	// เลือกกิจกรรมเดียว ตารางนี้จะกลายเป็น "แต่ละแผนกมางานนี้กี่ %"
+	eventOnly := f.eventClause("e.id", f.event, &args)
+
 	return store.Query(`
 		WITH staff AS (
 		  SELECT u.id, u.department FROM users u
-		  WHERE u.role = 'user' AND u.department <> ''`+clause+`
+		  -- ตัดคนที่ลาออกออกเหมือนบล็อกอื่น ไม่งั้นแผนกที่มีคนลาออกจะถูกหารด้วยหัวที่ไม่มีอยู่แล้ว
+		  -- แล้วอัตราของแผนกนั้นจะต่ำกว่าความจริงโดยไม่มีอะไรบอก
+		  WHERE u.role = 'user' AND u.status = 'Active' AND u.department <> ''`+clause+`
 		),
 		dept AS (
 		  SELECT department, count(*)::int AS people FROM staff GROUP BY department
@@ -370,7 +641,7 @@ func departmentRates(f analyticsFilter) ([]store.Row, error) {
 		  -- กิจกรรมที่เผยแพร่แล้วทุกงานในช่วง ไม่ต้องรอให้งานจบ
 		  -- งานที่ยังไม่มีคนลงทะเบียนนับเป็น 0 ในค่าเฉลี่ย ไม่ใช่ข้ามไป
 		  SELECT e.id FROM events e
-		  WHERE e.event_date >= $1 AND e.event_date < $2`+publishedEvents+`
+		  WHERE e.event_date >= $1 AND e.event_date < $2`+publishedEvents+eventOnly+`
 		),
 		joined AS (
 		  SELECT s.department, count(*)::int AS total
@@ -436,6 +707,18 @@ func pointStats(f analyticsFilter) (web.Map, error) {
 func pointTrend(f analyticsFilter) ([]store.Row, error) {
 	args := []any{f.since, f.until}
 	clause := f.userClause("u", &args)
+
+	/*
+		เลือกกิจกรรมเดียว = ดูเฉพาะคะแนนที่แจกจากกิจกรรมนั้น
+
+		แท่ง "คะแนนที่ใช้ไป" จะเป็นศูนย์เสมอ เพราะการแลกของรางวัลไม่ได้ผูกกับกิจกรรม
+		ไม่ใช่ข้อผิดพลาด แต่เป็นความจริงที่ว่าคะแนนที่ใช้ไปแยกไม่ได้ว่ามาจากงานไหน
+		เส้นยอดสะสมจึงกลายเป็น "คะแนนที่งานนี้แจกไปแล้วทั้งหมด"
+
+		ใส่เงื่อนไขเดียวกันทั้ง opening และ moved ไม่งั้นยอดยกมาจะเป็นของทั้งระบบ
+		แต่ยอดรายเดือนเป็นของกิจกรรมเดียว เส้นกับแท่งจะคนละเรื่องกัน
+	*/
+	clause += f.eventClause("t.event_id", f.event, &args)
 
 	/*
 		เติมเดือนที่ไม่มีรายการให้ครบทั้งช่วงที่เลือก
@@ -582,16 +865,25 @@ func AdminFrequencyPeople(w http.ResponseWriter, r *http.Request) {
 	}
 
 	args := []any{f.since, f.until}
+	eventOnly := f.eventClause("e.id", f.event, &args)
 	clause := f.userClause("u", &args)
 
+	/*
+		รายชื่อในช่องนี้ต้องนับด้วยกติกาเดียวกับโดนัทที่กดมา
+
+		เดิมต่างกันสามจุด กดช่อง "ไป 2-3 ครั้ง" แล้วได้รายชื่อไม่ตรงกับตัวเลขบนช่อง
+		  - โดนัทยึดวันจัดงาน ตรงนี้ยึดวันที่กดลงทะเบียน
+		  - โดนัทกรองตามกิจกรรมที่เลือก ตรงนี้ไม่กรอง
+		  - ทั้งคู่ไม่ได้ตัดคนที่ลาออกออก (แก้พร้อมกันที่บล็อกโดนัท)
+	*/
 	people, err := store.Query(`
 		WITH counted AS (
 		  SELECT u.id, u.employee_code, u.display_name, u.department, u.position, u.branch, u.tier,
 		         (SELECT count(*) FROM event_registrations r
 		          JOIN events e ON e.id = r.event_id
 		          WHERE r.user_id = u.id AND r.status = 'attended'
-		            AND r.created_at >= $1 AND r.created_at < $2`+publishedEvents+`) AS times
-		  FROM users u WHERE u.role = 'user'`+clause+`
+		            AND e.event_date >= $1 AND e.event_date < $2`+publishedEvents+eventOnly+`) AS times
+		  FROM users u WHERE u.role = 'user' AND u.status = 'Active'`+clause+`
 		)
 		SELECT employee_code, display_name, department, position, branch, tier, times::int
 		FROM counted WHERE `+condition+`

@@ -3,6 +3,7 @@ import { api } from '../../lib/api';
 import AdminShell from '../../components/AdminShell';
 import ComboBox, { Select } from '../../components/ComboBox';
 import { useAuth } from '../../context/AuthContext';
+import { isSystemAdmin } from '../../lib/org';
 import { useOrgOptions } from '../../lib/useOrgOptions';
 import {
   Avatar,
@@ -305,6 +306,16 @@ const EMPTY_FORM = {
 function EmployeeForm({ open, onClose, editing, onSaved }) {
   const toast = useToast();
   const org = useOrgOptions();
+  const { user: me } = useAuth();
+
+  /*
+    ตอนเพิ่มพนักงานใหม่ ทุกคนที่เข้าหลังบ้านได้ตั้งรหัสผ่านตั้งต้นให้
+    เพราะต้องส่งรหัสให้เจ้าตัวไปเข้าครั้งแรกอยู่แล้ว ยังไม่มีบัญชีให้แย่งใช้
+
+    ตอนแก้ไข เฉพาะผู้ดูแลระบบ เพราะการตั้งรหัสใหม่ให้บัญชีที่ใช้งานอยู่
+    คือการยึดบัญชีนั้นได้ทันที ซึ่งกว้างกว่าสิทธิ์ดูแลทะเบียนพนักงาน
+  */
+  const maySetPassword = !editing || isSystemAdmin(me);
   const [form, setForm] = useState(EMPTY_FORM);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -365,6 +376,10 @@ function EmployeeForm({ open, onClose, editing, onSaved }) {
       const payload = { ...form };
       if (!payload.password) delete payload.password;
 
+      // คนที่ไม่มีสิทธิ์ตั้งรหัสผ่าน ต้องไม่ส่งช่องนี้ไปเลย
+      // ไม่งั้นค่าที่ค้างอยู่ในฟอร์มจะทำให้เซิร์ฟเวอร์ปฏิเสธทั้งคำขอ
+      if (!maySetPassword) delete payload.password;
+
       if (editing) await api.adminUpdateEmployee(editing.id, payload);
       else await api.adminCreateEmployee(payload);
       toast(editing ? 'บันทึกข้อมูลแล้ว' : 'เพิ่มพนักงานแล้ว', 'primary');
@@ -408,21 +423,37 @@ function EmployeeForm({ open, onClose, editing, onSaved }) {
               disabled={!!editing}
             />
           </div>
+          {/*
+            ตั้งรหัสผ่านให้พนักงานคนอื่น เป็นสิทธิ์ของผู้ดูแลระบบเท่านั้น
+
+            GA, ER, HR แก้ข้อมูลพนักงานได้ทุกช่องยกเว้นช่องนี้
+            เพราะรหัสผ่านคือกุญแจเข้าบัญชี ใครตั้งใหม่ได้ก็สวมเป็นคนนั้นได้ทันที
+
+            แสดงช่องที่ล็อกไว้ให้เห็น ไม่ได้ซ่อนทิ้ง เพราะการซ่อนทำให้เข้าใจว่า
+            ระบบไม่มีช่องนี้ แล้วไปตามหาที่อื่น ส่วนแม่กุญแจบอกตรง ๆ ว่ามีแต่แก้ไม่ได้
+            ของจริงกันที่เซิร์ฟเวอร์ (AdminUpdateEmployee)
+          */}
           <div>
-            <label className="label" htmlFor="password">
+            <label className="label flex items-center gap-1.5" htmlFor="password">
               รหัสผ่าน {editing ? '' : '*'}
+              {!maySetPassword && <Icon.Lock size={14} />}
             </label>
-            {/* type text เพื่อให้ผู้ดูแลอ่านสิ่งที่พิมพ์ได้ จะได้ไม่พิมพ์ผิดแล้วไม่รู้ตัว
-                ตอนแก้ไขช่องนี้ว่างเสมอ เพราะรหัสผ่านถูกเก็บแบบแปลงทางเดียว อ่านกลับมาไม่ได้ */}
-            <input
-              id="password"
-              type="text"
-              className="field"
-              value={form.password}
-              onChange={set('password')}
-              required={!editing}
-              autoComplete="new-password"
-            />
+
+            {maySetPassword ? (
+              /* type text เพื่อให้ผู้ดูแลอ่านสิ่งที่พิมพ์ได้ จะได้ไม่พิมพ์ผิดแล้วไม่รู้ตัว
+                 ตอนแก้ไขช่องนี้ว่างเสมอ เพราะรหัสผ่านถูกเก็บแบบแปลงทางเดียว อ่านกลับมาไม่ได้ */
+              <input
+                id="password"
+                type="text"
+                className="field"
+                value={form.password}
+                onChange={set('password')}
+                required={!editing}
+                autoComplete="new-password"
+              />
+            ) : (
+              <input id="password" className="field bg-page" value="" disabled readOnly />
+            )}
           </div>
 
           <div>

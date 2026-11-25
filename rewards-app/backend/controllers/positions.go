@@ -17,16 +17,22 @@ import (
 ตัวรายการและกติกาสิทธิ์อยู่ในแพ็กเกจ rewards/org เพราะ middleware ต้องใช้ด้วย
 */
 
-// CanAdjustPoints บอกว่าผู้ใช้คนนี้มีสิทธิ์ปรับคะแนนด้วยมือหรือไม่
-//
-// กติกา
-//   - role admin ทำได้ทุกอย่างเสมอ ไม่ดูแผนกหรือตำแหน่ง
-//   - คนอื่นต้องอยู่ในแผนกหลังบ้าน และมีตำแหน่งอยู่ในรายการที่กำหนด
-//
-// อ่านแผนกกับตำแหน่งจากฐานข้อมูลทุกครั้งแทนที่จะฝังไว้ใน token
-// เพราะถ้าผู้ดูแลย้ายแผนกหรือลดตำแหน่งใคร สิทธิ์ต้องหายทันที
-// ไม่ใช่รอจนกว่า token เดิมจะหมดอายุอีกเจ็ดวัน
-func CanAdjustPoints(claims *security.Claims) bool {
+/*
+CanRunAnnualReset บอกว่าผู้ใช้คนนี้สั่งตัดยอดคะแนนประจำปีได้หรือไม่
+
+กติกา
+  - role admin ทำได้เสมอ ไม่ดูแผนกหรือตำแหน่ง
+  - คนอื่นต้องอยู่ในแผนกหลังบ้าน และมีตำแหน่งอยู่ในรายการที่กำหนด
+
+เป็นกติกาเดิมของการปรับคะแนนก่อนที่การปรับคะแนนจะย้ายไปใช้ระบบขออนุมัติ
+ตั้งใจไม่ย้ายตามไปด้วย เพราะการตัดยอดกระทบทุกคนพร้อมกันและย้อนกลับไม่ได้
+ถ้าเปิดให้ทุกตำแหน่งยื่นแบบเดียวกับการปรับคะแนนรายคน จะกว้างเกินกว่าเดิม
+
+อ่านแผนกกับตำแหน่งจากฐานข้อมูลทุกครั้งแทนที่จะฝังไว้ใน token
+เพราะถ้าผู้ดูแลย้ายแผนกหรือลดตำแหน่งใคร สิทธิ์ต้องหายทันที
+ไม่ใช่รอจนกว่า token เดิมจะหมดอายุอีกเจ็ดวัน
+*/
+func CanRunAnnualReset(claims *security.Claims) bool {
 	if claims == nil {
 		return false
 	}
@@ -70,9 +76,16 @@ func AdminOrgOptions(w http.ResponseWriter, r *http.Request) {
 		"adminSections":  org.AdminSections,
 		"extraPositions": values(extraPositions),
 		"extraSections":  values(extraSections),
+		// ตัดยอดประจำปี ยังใช้กติกาเดิมคือแผนกหลังบ้าน + ตำแหน่งในรายการ
 		"canAdjustPoints": web.Map{
 			"sections":  org.BackOfficeSections,
 			"positions": org.AdjustPointsPositions,
+		},
+		// ปรับคะแนนรายคน ยื่นได้ทุกตำแหน่งในสามแผนก แต่ต้องอนุมัติสองฝั่ง
+		"pointRequest": web.Map{
+			"sections":            org.PointRequestSections,
+			"approverSections":    append(append([]string{}, org.GASections...), org.HRSections...),
+			"minApproverPosition": org.MinApproverPosition,
 		},
 	})
 }

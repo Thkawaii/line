@@ -3,7 +3,7 @@ import { SpecialPointIcon } from './SpecialPoints';
 import { ImagePlaceholder } from './ui';
 import { dateRange, num, timeRange } from '../lib/format';
 import { useT } from '../lib/i18n';
-import { tierIcon, tierSolidCircle, TIER_COLOR } from '../lib/tier';
+import { pointsBadge, tierIcon, tierSolidCircle, TIER_COLOR } from '../lib/tier';
 
 function FavoriteButton({ active, onClick }) {
   const t = useT();
@@ -168,16 +168,27 @@ export function RewardCard({ reward, myPoints, mySpecialPoints, onOpen, onFavori
         </div>
 
         <p className="mt-1 flex items-center gap-1.5">
-          {/* คะแนนพิเศษใช้ไอคอน K-Point แทนดาว ผู้ใช้จึงแยกออกทันทีว่าจ่ายด้วยอะไร
-              โดยไม่ต้องอ่านคำกำกับ */}
+          {/*
+            ไอคอนหน้าเลขคะแนนผูกกับระดับของรางวัล ให้ตรงกับป้ายมุมรูปและกับหน้ารายละเอียด
+            Member ดาวเทา · Silver ดาวมีประกายสีเทอร์ควอยซ์ · Elite มงกุฎทอง
+
+            เดิมการ์ดนี้โชว์ดาวเทาดวงเดียวและโชว์เฉพาะตอนคะแนนไม่พอ
+            ของชิ้นเดียวกันจึงมีไอคอนบ้างไม่มีบ้างแล้วแต่ยอดคะแนนของคนที่เปิดดู
+            และระดับของรางวัลก็อ่านไม่ออกจากบรรทัดนี้เลย
+
+            คะแนนพิเศษใช้ไอคอน K-Point แทน ผู้ใช้จึงแยกออกทันทีว่าจ่ายด้วยกระเป๋าไหน
+          */}
           {special ? (
             <SpecialPointIcon size={18} />
           ) : (
-            notEnough && (
-              <span className="text-slate">
-                <Icon.Star size={16} />
-              </span>
-            )
+            (() => {
+              const { circleClass, Icon: PointsIcon } = pointsBadge(reward.min_tier);
+              return (
+                <span className={`grid h-[18px] w-[18px] shrink-0 place-items-center rounded-full ${circleClass}`}>
+                  <PointsIcon size={11} />
+                </span>
+              );
+            })()
           )}
           {reward.old_points && (
             <span className="text-2xs text-muted line-through">{num(reward.old_points)}</span>

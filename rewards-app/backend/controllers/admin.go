@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"rewards/config"
@@ -378,7 +379,23 @@ func AdminUpdateEmployee(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ตั้งรหัสผ่านใหม่เฉพาะตอนที่ผู้ดูแลกรอกมา ส่งว่างมาคือไม่เปลี่ยน
+	/*
+		ตั้งรหัสผ่านใหม่ให้คนอื่น เป็นของผู้ดูแลระบบเท่านั้น
+
+		GA, ER, HR แก้ข้อมูลพนักงานได้ทุกช่องยกเว้นช่องนี้
+		เพราะรหัสผ่านคือกุญแจเข้าบัญชี ใครตั้งใหม่ได้ก็สวมเป็นคนนั้นได้ทันที
+		ซึ่งกว้างกว่าสิทธิ์ "ดูแลทะเบียนพนักงาน" ที่เขาควรมี
+
+		ตรวจหลังอัปเดตช่องอื่นเสร็จแล้ว ช่องที่เขามีสิทธิ์แก้จึงบันทึกได้ตามปกติ
+		แล้วค่อยบอกว่าช่องรหัสผ่านไม่ผ่าน ดีกว่าปฏิเสธทั้งฟอร์มทิ้ง
+	*/
+	if body.Password != "" && claims.Role != "admin" {
+		web.Error(w, http.StatusForbidden,
+			"แก้ไขข้อมูลอื่นเรียบร้อยแล้ว แต่การตั้งรหัสผ่านใหม่เป็นสิทธิ์ของผู้ดูแลระบบเท่านั้น")
+		return
+	}
+
+	// ส่งว่างมาคือไม่เปลี่ยน
 	if body.Password != "" {
 		hash, err := security.HashPassword(body.Password)
 		if err != nil {
@@ -454,15 +471,43 @@ func AdminPoints(w http.ResponseWriter, r *http.Request) {
 	page := web.IntParam(r, "page", 1, 1, 1000000)
 	offset := (page - 1) * limit
 
+	/*
+		รายการที่มาจากคำขอปรับคะแนน ติดข้อมูลการอนุมัติไปด้วย
+
+		เวลามีคนทักว่า "คะแนนหายไป 200 ใครทำ" คำตอบต้องอยู่ในแถวเดียวกับตัวเลข
+		ไม่ใช่ให้ไปไล่หาในหน้าคำขอแล้วจับคู่เองจากวันเวลา
+
+		ใช้ LEFT JOIN เพราะรายการส่วนใหญ่มาจากกิจกรรมหรือการแลกของรางวัล
+		ซึ่งไม่มีคำขอผูกอยู่ ค่าที่ได้จะเป็น null แล้วหน้าเว็บไม่แสดงส่วนนี้
+	*/
 	transactions, err := store.Query(fmt.Sprintf(`
-		SELECT t.id, t.kind, t.source, t.title, t.points, t.created_at,
-		       u.display_name, u.employee_code, u.department
-		FROM point_transactions t JOIN users u ON u.id = t.user_id
+		SELECT t.id, t.kind, t.source, t.title, t.points, t.created_at, t.point_kind,
+		       u.display_name, u.employee_code, u.department,
+		       q.id       AS request_id,
+		       q.reason   AS request_reason,
+		       a.display_name AS requested_by_name,
+		       a.department   AS requested_by_department,
+		       CASE WHEN q.id IS NULL THEN NULL ELSE COALESCE((
+		         SELECT json_agg(json_build_object(
+		                  'group', v.approver_group,
+		                  'name',  w.display_name,
+		                  'position', w.position,
+		                  'note',  v.note,
+		                  'at',    v.created_at)
+		                ORDER BY v.created_at)
+		         FROM point_adjustment_approvals v
+		         JOIN users w ON w.id = v.approver_id
+		         WHERE v.request_id = q.id AND v.decision = 'approve'), '[]'::json) END AS approvers
+		FROM point_transactions t
+		JOIN users u ON u.id = t.user_id
+		LEFT JOIN point_adjustment_requests q ON q.id = t.adjust_request_id
+		LEFT JOIN users a ON a.id = q.requested_by
 		%s ORDER BY t.created_at DESC LIMIT %d OFFSET %d`, clause, limit, offset), args...)
 	if err != nil {
 		web.Fail(w, err)
 		return
 	}
+	decodeJSONColumn(transactions, "approvers")
 
 	total, err := store.Count(
 		`SELECT count(*)::int FROM point_transactions t JOIN users u ON u.id = t.user_id `+clause, args...)
@@ -476,121 +521,81 @@ func AdminPoints(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// AdminAdjustPoints ปรับคะแนนด้วยมือ เช่น ให้คะแนนย้อนหลังหรือหักคืน
-func AdminAdjustPoints(w http.ResponseWriter, r *http.Request) {
-	claims := middleware.CurrentUser(r)
+/*
+applyPointAdjustment ลงคะแนนตามคำขอที่ผ่านการอนุมัติครบแล้ว
 
-	// สิทธิ์ปรับคะแนนผูกกับตำแหน่งงาน ไม่ใช่แค่การเป็นผู้ดูแลระบบ
-	// role admin ผ่านเสมอ ส่วนคนอื่นต้องมีตำแหน่งตั้งแต่ Chief Engineer ขึ้นไป
-	if !CanAdjustPoints(claims) {
-		web.Error(w, http.StatusForbidden,
-			"บัญชีนี้ไม่มีสิทธิ์ปรับคะแนน — ต้องอยู่ในแผนกหลังบ้านและมีตำแหน่งที่กำหนดไว้")
-		return
-	}
+เรียกจากในธุรกรรมเดียวกับที่บันทึกการอนุมัติ ไม่ได้เปิดธุรกรรมของตัวเอง
+ถ้าขั้นใดขั้นหนึ่งล้ม ทั้งคะแนนและสถานะคำขอต้องย้อนกลับไปพร้อมกัน
+ไม่ใช่เหลือคำขอที่เขียนว่า "อนุมัติแล้ว" ทั้งที่คะแนนไม่ได้เข้า
 
-	var body struct {
-		UserID    int64   `json:"userId"`
-		Points    int     `json:"points"`
-		Title     string  `json:"title"`
-		PointKind string  `json:"pointKind"`
-		ExpireAt  *string `json:"expireAt"` // ใช้กับคะแนนพิเศษเท่านั้น
-	}
-	if err := web.Decode(r, &body); err != nil || body.UserID == 0 || body.Points == 0 {
-		web.Error(w, http.StatusBadRequest, "ระบุพนักงานและจำนวนคะแนน")
-		return
-	}
+คืนชื่อระดับใหม่ถ้าระดับสมาชิกเปลี่ยน ไม่เปลี่ยนก็คืนค่าว่าง
 
-	special := body.PointKind == "special"
-
-	title := body.Title
-	if title == "" {
-		title = "ปรับคะแนนโดยผู้ดูแลระบบ"
-	}
-
-	tx, err := config.DB.Begin()
-	if err != nil {
-		web.Fail(w, err)
-		return
-	}
-	defer tx.Rollback()
+ตัวตัดสินสิทธิ์ไม่ได้อยู่ในนี้ ผู้เรียกต้องตรวจมาก่อนแล้ว
+(ดู AdminDecidePointRequest ใน pointrequests.go)
+*/
+func applyPointAdjustment(tx *sql.Tx, userID int64, points int, special bool,
+	title string, expireAt *string, requestID int64) (string, error) {
 
 	// การปรับด้วยมือใช้จำนวนตามที่ผู้ดูแลกรอก ไม่คูณตัวคูณของระดับ
 	if special {
 		// คะแนนพิเศษมีวันหมดอายุ จึงใช้ทางเดียวกับการจ่ายคะแนนจากกิจกรรม
 		// เพื่อให้กติกาการเลื่อนวันหมดอายุเหมือนกันทุกทาง
-		if body.Points > 0 {
-			if err := awardSpecialPoints(tx, body.UserID, body.Points, title,
-				nullDate(body.ExpireAt)); err != nil {
-				web.Fail(w, err)
-				return
+		if points > 0 {
+			if err := awardSpecialPoints(tx, userID, points, title, nullDate(expireAt), nil, requestID); err != nil {
+				return "", err
 			}
 		} else {
 			// หักคืน ไม่แตะวันหมดอายุ
 			if _, err := tx.Exec(
 				`UPDATE users SET special_points = GREATEST(special_points + $2, 0) WHERE id = $1`,
-				body.UserID, body.Points); err != nil {
-				web.Fail(w, err)
-				return
+				userID, points); err != nil {
+				return "", err
 			}
 			if _, err := tx.Exec(`
-				INSERT INTO point_transactions (user_id, kind, source, title, points, point_kind)
-				VALUES ($1,'adjust','system',$2,$3,'special')`,
-				body.UserID, title, body.Points); err != nil {
-				web.Fail(w, err)
-				return
+				INSERT INTO point_transactions
+				  (user_id, kind, source, title, points, point_kind, adjust_request_id)
+				VALUES ($1,'adjust','system',$2,$3,'special',$4)`,
+				userID, title, points, requestID); err != nil {
+				return "", err
 			}
 		}
-	} else if _, err := tx.Exec(
+		if err := notifyPointAdjusted(tx, userID, points, true, title, requestID); err != nil {
+			return "", err
+		}
+		// ระดับสมาชิกคิดจากคะแนนปกติเท่านั้น ปรับคะแนนพิเศษจึงไม่กระทบระดับ
+		return "", nil
+	}
+
+	if _, err := tx.Exec(
 		`UPDATE users SET points = GREATEST(points + $2, 0) WHERE id = $1`,
-		body.UserID, body.Points); err != nil {
-		web.Fail(w, err)
-		return
+		userID, points); err != nil {
+		return "", err
 	}
-	if !special {
-		if _, err := tx.Exec(`
-			INSERT INTO point_transactions (user_id, kind, source, title, points, point_kind)
-			VALUES ($1,'adjust','system',$2,$3,'point')`,
-			body.UserID, title, body.Points); err != nil {
-			web.Fail(w, err)
-			return
-		}
+	if _, err := tx.Exec(`
+		INSERT INTO point_transactions
+		  (user_id, kind, source, title, points, point_kind, adjust_request_id)
+		VALUES ($1,'adjust','system',$2,$3,'point',$4)`,
+		userID, title, points, requestID); err != nil {
+		return "", err
 	}
 
-	// ระดับสมาชิกคิดจากคะแนนปกติเท่านั้น ปรับคะแนนพิเศษจึงไม่กระทบระดับ
-	changedTier := ""
-	if !special {
-		var upgraded bool
-		var err error
-		changedTier, upgraded, err = recalcTierExact(tx, body.UserID)
-		if err != nil {
-			web.Fail(w, err)
-			return
-		}
-		if upgraded {
-			err = notifyTierUp(tx, body.UserID, changedTier)
-		} else {
-			err = notifyTierDown(tx, body.UserID, changedTier)
-		}
-		if err != nil {
-			web.Fail(w, err)
-			return
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		web.Fail(w, err)
-		return
+	if err := notifyPointAdjusted(tx, userID, points, false, title, requestID); err != nil {
+		return "", err
 	}
 
-	unit := "คะแนน"
-	if special {
-		unit = "คะแนนพิเศษ"
+	changedTier, upgraded, err := recalcTierExact(tx, userID)
+	if err != nil {
+		return "", err
 	}
-	detail := fmt.Sprintf("%d %s", body.Points, unit)
-	if changedTier != "" {
-		detail += " · ระดับเปลี่ยนเป็น " + changedTier
+	if upgraded {
+		err = notifyTierUp(tx, userID, changedTier)
+	} else {
+		err = notifyTierDown(tx, userID, changedTier)
 	}
-	logAudit(claims.ID, "points.adjust", fmt.Sprintf("user #%d", body.UserID), detail)
-	web.JSON(w, http.StatusOK, web.Map{"ok": true})
+	if err != nil {
+		return "", err
+	}
+	return changedTier, nil
 }
 
 /* ---------- ของรางวัลและการรับของ ---------- */
@@ -717,23 +722,140 @@ func AdminUpdateReward(w http.ResponseWriter, r *http.Request) {
 	web.JSON(w, http.StatusOK, web.Map{"reward": reward})
 }
 
+/*
+AdminRedemptions ส่งรายการแลกของรางวัลให้หน้าผู้ดูแล
+
+รองรับการค้นหาและกรองตามที่หน้าจอออกแบบไว้
+
+	q          รหัสอ้างอิง หรือรหัสพนักงาน หรือชื่อพนักงาน
+	department แผนก
+	branch     สาขา
+	date       today | week | month | all   นับจากวันที่แลก
+	status     pending | received | cancelled | all
+
+ส่งจำนวนของทุกสถานะมาด้วยเสมอ ไม่ใช่เฉพาะสถานะที่เลือกอยู่
+ชิปสถานะบนหน้าจอต้องโชว์ตัวเลขได้ทุกอันพร้อมกัน ถ้านับเฉพาะอันที่เลือก
+ผู้ดูแลจะต้องกดไล่ทีละอันเพื่อดูว่ามีงานค้างกี่ชิ้น
+
+จำนวนนับตามตัวกรองอื่น (ค้นหา แผนก สาขา วันที่) แต่ไม่นับตัวกรองสถานะ
+เลขบนชิปจึงหมายถึง "ในขอบเขตที่กรองอยู่ตอนนี้ มีสถานะละกี่รายการ"
+*/
 func AdminRedemptions(w http.ResponseWriter, r *http.Request) {
 	status := web.Param(r, "status", "pending")
 
-	rows, err := store.Query(`
-		SELECT d.id, d.ref_code, d.points_used, d.status, d.redeemed_at, d.received_at,
-		       u.display_name, u.employee_code, u.department, r.name AS reward_name
+	// เงื่อนไขร่วม ใช้ทั้งกับการนับและการดึงรายการ จะได้ไม่มีทางหลุดกัน
+	args := []any{}
+	where := " WHERE true"
+
+	if q := strings.TrimSpace(web.Param(r, "q", "")); q != "" {
+		args = append(args, "%"+q+"%")
+		where += fmt.Sprintf(
+			" AND (d.ref_code ILIKE $%d OR u.employee_code ILIKE $%d OR u.display_name ILIKE $%d)",
+			len(args), len(args), len(args))
+	}
+	if department := web.Param(r, "department", "all"); department != "all" && department != "" {
+		args = append(args, department)
+		where += fmt.Sprintf(" AND u.department = $%d", len(args))
+	}
+	if branch := web.Param(r, "branch", "all"); branch != "all" && branch != "" {
+		args = append(args, branch)
+		where += fmt.Sprintf(" AND u.branch = $%d", len(args))
+	}
+
+	/*
+		ช่วงวันที่นับจากเขตเวลาของเซิร์ฟเวอร์
+
+		"วันนี้" ต้องหมายถึงวันนี้ของคนที่นั่งดูหน้าจออยู่ ไม่ใช่วันนี้ตาม UTC
+		ถ้าใช้ UTC ตรง ๆ รายการที่แลกตอนเช้าตรู่ของไทยจะไปโผล่ใน "เมื่อวาน"
+	*/
+	switch web.Param(r, "date", "all") {
+	case "today":
+		where += " AND d.redeemed_at >= date_trunc('day', now())"
+	case "week":
+		where += " AND d.redeemed_at >= date_trunc('day', now()) - interval '6 days'"
+	case "month":
+		where += " AND d.redeemed_at >= date_trunc('month', now())"
+	}
+
+	from := `
 		FROM redemptions d
 		JOIN users u ON u.id = d.user_id
-		JOIN rewards r ON r.id = d.reward_id
-		WHERE ($1 = 'all' OR d.status = $1)
-		ORDER BY d.redeemed_at DESC LIMIT 200`, status)
+		JOIN rewards r ON r.id = d.reward_id` + where
+
+	counts, err := store.QueryOne(`
+		SELECT count(*) FILTER (WHERE d.status = 'pending')::int   AS pending,
+		       count(*) FILTER (WHERE d.status = 'received')::int  AS received,
+		       count(*) FILTER (WHERE d.status = 'cancelled')::int AS cancelled,
+		       count(*)::int AS all`+from, args...)
 	if err != nil {
 		web.Fail(w, err)
 		return
 	}
 
-	web.JSON(w, http.StatusOK, web.Map{"redemptions": rows})
+	page, limit := pageArgs(r)
+
+	listArgs := append(append([]any{}, args...), status, limit, (page-1)*limit)
+	statusAt := len(args) + 1
+
+	rows, err := store.Query(`
+		SELECT d.id, d.ref_code, d.points_used, d.status, d.redeemed_at, d.received_at,
+		       d.point_kind,
+		       u.display_name, u.employee_code, u.department, u.branch, u.position,
+		       r.name AS reward_name, r.image_url
+		`+from+fmt.Sprintf(` AND ($%d = 'all' OR d.status = $%d)`, statusAt, statusAt)+
+		fmt.Sprintf(` ORDER BY d.redeemed_at DESC LIMIT $%d OFFSET $%d`, statusAt+1, statusAt+2),
+		listArgs...)
+	if err != nil {
+		web.Fail(w, err)
+		return
+	}
+
+	total := counts["all"]
+	if status != "all" {
+		total = counts[status]
+	}
+
+	web.JSON(w, http.StatusOK, web.Map{
+		"redemptions": rows,
+		"counts":      counts,
+		"total":       total,
+		"page":        page,
+		"limit":       limit,
+		"departments": distinctValues("department"),
+		"branches":    distinctValues("branch"),
+	})
+}
+
+/*
+pageArgs อ่านหน้าและจำนวนต่อหน้าจาก query string
+
+จำกัดเพดานไว้ที่ 100 เพราะตารางนี้มีรูปของรางวัลอยู่ด้วย
+ถ้าปล่อยให้ขอทีละพันแถว หน้าจอจะค้างตอนวาดก่อนที่ข้อมูลจะมาครบ
+*/
+func pageArgs(r *http.Request) (int, int) {
+	page, err := strconv.Atoi(web.Param(r, "page", "1"))
+	if err != nil || page < 1 {
+		page = 1
+	}
+	limit, err := strconv.Atoi(web.Param(r, "limit", "10"))
+	if err != nil || limit < 1 || limit > 100 {
+		limit = 10
+	}
+	return page, limit
+}
+
+// distinctValues คืนค่าที่มีจริงในทะเบียนพนักงาน ใช้ทำช่องเลือกตัวกรอง
+//
+// ดึงจากข้อมูลจริงแทนที่จะใช้รายการมาตรฐาน เพราะช่องเลือกที่มีตัวเลือก
+// ซึ่งไม่มีใครอยู่เลย ทำให้ผู้ดูแลเลือกแล้วได้ตารางว่างโดยไม่รู้ว่าทำไม
+func distinctValues(column string) []string {
+	rows, err := store.Query(`
+		SELECT DISTINCT ` + pq.QuoteIdentifier(column) + ` AS value
+		FROM users WHERE TRIM(` + pq.QuoteIdentifier(column) + `) <> '' ORDER BY 1`)
+	if err != nil {
+		return []string{}
+	}
+	return values(rows)
 }
 
 // AdminReceiveRedemption ยืนยันว่าพนักงานมารับของแล้ว
@@ -835,6 +957,10 @@ func AdminCreateEvent(w http.ResponseWriter, r *http.Request) {
 		web.Error(w, http.StatusBadRequest, msg)
 		return
 	}
+	if msg := checkSpecialExpiry(body.SpecialPoints, body.SpecialPointsExpireAt); msg != "" {
+		web.Error(w, http.StatusBadRequest, msg)
+		return
+	}
 
 	event, err := store.QueryOne(`
 		INSERT INTO events (title, description, agenda, location, image_url, event_date, end_date,
@@ -883,6 +1009,10 @@ func AdminUpdateEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if msg := checkDateOrder(body.EventDate, body.EndDate); msg != "" {
+		web.Error(w, http.StatusBadRequest, msg)
+		return
+	}
+	if msg := checkSpecialExpiry(body.SpecialPoints, body.SpecialPointsExpireAt); msg != "" {
 		web.Error(w, http.StatusBadRequest, msg)
 		return
 	}
@@ -1054,8 +1184,8 @@ func AdminCheckIn(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if _, err := tx.Exec(`
-			INSERT INTO point_transactions (user_id, kind, source, title, points)
-			VALUES ($1,'earn','event',$2,$3)`, userID, "เข้าร่วม "+title, awarded); err != nil {
+			INSERT INTO point_transactions (user_id, kind, source, title, points, event_id)
+			VALUES ($1,'earn','event',$2,$3,$4)`, userID, "เข้าร่วม "+title, awarded, eventID); err != nil {
 			web.Fail(w, err)
 			return
 		}
@@ -1073,7 +1203,7 @@ func AdminCheckIn(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// คะแนนพิเศษจ่ายแยกจากคะแนนปกติ และจ่ายแม้กิจกรรมจะไม่ได้ตั้งคะแนนปกติไว้
-	if err := awardSpecialPoints(tx, userID, specialPoints, "เข้าร่วม "+title, specialExpire); err != nil {
+	if err := awardSpecialPoints(tx, userID, specialPoints, "เข้าร่วม "+title, specialExpire, eventID, nil); err != nil {
 		web.Fail(w, err)
 		return
 	}
@@ -1179,6 +1309,25 @@ func checkDateOrder(start, end *string) string {
 	}
 	if *end < *start {
 		return "วันสิ้นสุดต้องไม่มาก่อนวันเริ่ม"
+	}
+	return ""
+}
+
+/*
+checkSpecialExpiry บังคับให้กิจกรรมที่จ่ายคะแนนพิเศษต้องระบุวันหมดอายุเสมอ
+
+คะแนนพิเศษเป็นรางวัลเฉพาะกิจ ไม่ใช่คะแนนสะสม ถ้าปล่อยให้ไม่มีวันหมดอายุ
+ยอดจะค้างในระบบไปเรื่อย ๆ จนประมาณภาระของรางวัลล่วงหน้าไม่ได้
+
+ตรวจเฉพาะตอนที่ส่งคะแนนพิเศษมามากกว่า 0 กิจกรรมที่ไม่จ่ายคะแนนพิเศษ
+(หรือตอนแก้ไขที่ไม่ได้แตะช่องนี้) ไม่ต้องมีวันหมดอายุ
+*/
+func checkSpecialExpiry(points *int, expireAt *string) string {
+	if points == nil || *points <= 0 {
+		return ""
+	}
+	if blank(expireAt) {
+		return "กิจกรรมที่ให้คะแนนพิเศษต้องระบุวันหมดอายุของคะแนนพิเศษ"
 	}
 	return ""
 }

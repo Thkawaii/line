@@ -50,13 +50,21 @@ export default class ErrorBoundary extends Component {
             <button onClick={() => window.location.reload()} className="btn-ghost flex-1">
               โหลดหน้าใหม่
             </button>
+            {/*
+              พังที่หน้าผู้ดูแล ต้องกลับไปหน้าผู้ดูแล ไม่ใช่หน้าแอปพนักงาน
+
+              เดิมส่งกลับ / เสมอ ผู้ดูแลที่เจอหน้าพังจึงเด้งไปโผล่ฝั่งพนักงาน
+              ซึ่งงงกว่าตัวข้อผิดพลาดเอง เพราะดูเหมือนระบบสลับบัญชีให้
+            */}
             <button
               onClick={() => {
-                window.location.href = '/';
+                window.location.href = window.location.pathname.startsWith('/admin')
+                  ? '/admin'
+                  : '/';
               }}
               className="btn-primary flex-1"
             >
-              กลับหน้าแรก
+              {window.location.pathname.startsWith('/admin') ? 'กลับหน้าผู้ดูแล' : 'กลับหน้าแรก'}
             </button>
           </div>
         </div>

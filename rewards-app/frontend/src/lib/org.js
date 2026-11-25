@@ -103,9 +103,63 @@ export const ADJUST_POINTS_POSITIONS = [
   'Chief Officer',
 ];
 
+/* ---------- การปรับคะแนนแบบต้องขออนุมัติ ---------- */
+
+/**
+ * แผนกที่ยื่นขอปรับคะแนนได้ — ทุกตำแหน่งในแผนกเหล่านี้ยื่นได้
+ *
+ * ER, GA, HR ยื่นได้ แต่คะแนนยังไม่ขยับจนกว่าจะมีผู้อนุมัติครบสองฝั่ง
+ * รับรหัสทั้งสองแบบที่ใช้เรียกกันจริง เหมือน BACK_OFFICE_SECTIONS
+ */
+export const POINT_REQUEST_SECTIONS = ['ER', 'ERG', 'GA', 'GAG', 'HR', 'HRM', 'HRD'];
+
+/** แผนกของผู้อนุมัติสองฝั่ง คำขอหนึ่งใบต้องได้ทั้งสองฝั่งอย่างละคน */
+export const GA_SECTIONS = ['GA', 'GAG'];
+export const HR_SECTIONS = ['HR', 'HRM', 'HRD'];
+
+/**
+ * ตำแหน่งต่ำสุดที่อนุมัติคำขอปรับคะแนนได้
+ *
+ * "ขึ้นไป" วัดจากลำดับใน POSITIONS ซึ่งเรียงจากสูงสุดลงต่ำสุด
+ * แก้ค่านี้ค่าเดียวถ้าอยากเปลี่ยนเกณฑ์ ไม่ต้องไล่แก้รายชื่อ
+ */
+export const MIN_APPROVER_POSITION = 'Chief Officer';
+
 /** เทียบแบบไม่สนตัวพิมพ์เล็กใหญ่และช่องว่างหัวท้าย ข้อมูลนำเข้ามักมีช่องว่างติดมา */
 const has = (list, value) =>
   list.some((item) => item.toLowerCase() === String(value || '').trim().toLowerCase());
+
+/** ลำดับของตำแหน่งใน POSITIONS ยิ่งน้อยยิ่งสูง ไม่อยู่ในรายการคืน -1 */
+const positionRank = (position) =>
+  POSITIONS.findIndex((item) => item.toLowerCase() === String(position || '').trim().toLowerCase());
+
+/**
+ * canRequestPointAdjust บอกว่ายื่นขอปรับคะแนนได้ไหม
+ *
+ * ใช้ซ่อนปุ่มที่หน้าจอเท่านั้น การกันจริงอยู่ที่เซิร์ฟเวอร์
+ * (CanRequestPointAdjust ใน backend/controllers/pointrequests.go)
+ */
+export function canRequestPointAdjust(user) {
+  if (!user) return false;
+  if (user.role === 'admin') return true;
+  return has(POINT_REQUEST_SECTIONS, user.department);
+}
+
+/**
+ * approverGroup คืนฝั่งที่ผู้ใช้คนนี้อนุมัติได้ — 'GA', 'HR' หรือ '' ถ้าอนุมัติไม่ได้
+ *
+ * ไม่มีทางลัดให้ role admin เพราะกติกาบอกชัดว่าต้องเป็น GA หนึ่งคนและ HR หนึ่งคน
+ * ตำแหน่งที่พิมพ์เองนอกรายการมาตรฐานถือว่าอนุมัติไม่ได้ เพราะเทียบลำดับชั้นไม่ได้
+ */
+export function approverGroup(user) {
+  if (!user) return '';
+  const rank = positionRank(user.position);
+  const limit = positionRank(MIN_APPROVER_POSITION);
+  if (rank < 0 || rank > limit) return '';
+  if (has(GA_SECTIONS, user.department)) return 'GA';
+  if (has(HR_SECTIONS, user.department)) return 'HR';
+  return '';
+}
 
 /** อยู่ในแผนกหลังบ้านไหม = เข้าหน้าผู้ดูแลระบบได้ไหม */
 export const isBackOffice = (user) =>

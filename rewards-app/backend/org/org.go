@@ -142,6 +142,102 @@ func IsBackOfficeSection(section string) bool {
 // CanAdjustPoints บอกว่าแผนกและตำแหน่งนี้ปรับคะแนนได้หรือไม่
 //
 // ต้องผ่านทั้งสองเงื่อนไข: อยู่ในแผนกหลังบ้าน และมีตำแหน่งอยู่ในรายการ
+//
+// ใช้กับ "ตัดยอดคะแนนประจำปี" เท่านั้นแล้ว การปรับคะแนนรายคนย้ายไปใช้
+// ระบบยื่นขออนุมัติด้านล่าง ซึ่งเปิดให้ทุกตำแหน่งยื่นได้แต่ต้องมีคนอนุมัติ
 func CanAdjustPoints(section, position string) bool {
 	return IsBackOfficeSection(section) && contains(AdjustPointsPositions, position)
+}
+
+/* ---------- การปรับคะแนนแบบต้องขออนุมัติ ---------- */
+
+/*
+PointRequestSections คือแผนกที่ยื่นขอปรับคะแนนพนักงานได้
+
+ER, GA, HR ยื่นได้ทุกตำแหน่ง ไม่ดูระดับตำแหน่งเลย
+เพราะคนที่รู้เรื่องจริงว่าใครควรได้คะแนนคืนมักเป็นคนหน้างาน ไม่ใช่หัวหน้า
+ส่วนการกันความผิดพลาดย้ายไปอยู่ที่ขั้นอนุมัติแทน
+
+รับรหัสทั้งสองแบบที่ใช้เรียกกันจริง เหมือน BackOfficeSections
+*/
+var PointRequestSections = []string{"ER", "ERG", "GA", "GAG", "HR", "HRM", "HRD"}
+
+/*
+GASections และ HRSections คือแผนกของผู้อนุมัติสองฝั่ง
+
+คำขอหนึ่งใบต้องได้ทั้งฝั่ง GA และฝั่ง HR อย่างละคน
+ER ยื่นขอได้แต่อนุมัติไม่ได้ เพราะกติกาที่ตกลงกันระบุผู้อนุมัติไว้แค่สองฝั่งนี้
+*/
+var (
+	GASections = []string{"GA", "GAG"}
+	HRSections = []string{"HR", "HRM", "HRD"}
+)
+
+/*
+MinApproverPosition คือตำแหน่งต่ำสุดที่อนุมัติคำขอปรับคะแนนได้
+
+"ขึ้นไป" วัดจากลำดับใน Positions ซึ่งเรียงจากสูงสุดลงต่ำสุด
+ตำแหน่งที่อยู่เหนือหรือเท่ากับตำแหน่งนี้ในรายการถือว่าผ่าน
+
+ถ้าต่อไปอยากเปลี่ยนเกณฑ์ แก้ค่านี้ค่าเดียว ไม่ต้องไล่แก้รายชื่อ
+*/
+const MinApproverPosition = "Chief Officer"
+
+// PositionRank คืนลำดับของตำแหน่งใน Positions ยิ่งเลขน้อยยิ่งสูง
+// ตำแหน่งที่ไม่อยู่ในรายการ (ผู้ดูแลพิมพ์เอง) คืน false
+func PositionRank(position string) (int, bool) {
+	target := strings.ToLower(strings.TrimSpace(position))
+	if target == "" {
+		return 0, false
+	}
+	for i, item := range Positions {
+		if strings.ToLower(item) == target {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+// IsApproverPosition บอกว่าตำแหน่งนี้สูงพอจะอนุมัติคำขอปรับคะแนนหรือไม่
+//
+// ตำแหน่งที่พิมพ์เองนอกรายการมาตรฐานถือว่าไม่ผ่าน
+// เพราะเทียบลำดับชั้นกับตำแหน่งที่ไม่รู้จักไม่ได้ และการเดาในเรื่องสิทธิ์คือการเดาผิดฝั่ง
+func IsApproverPosition(position string) bool {
+	rank, ok := PositionRank(position)
+	if !ok {
+		return false
+	}
+	limit, _ := PositionRank(MinApproverPosition)
+	return rank <= limit
+}
+
+// CanRequestPointAdjust บอกว่าแผนกนี้ยื่นขอปรับคะแนนได้หรือไม่ ทุกตำแหน่งในแผนกยื่นได้
+func CanRequestPointAdjust(section string) bool {
+	return contains(PointRequestSections, section)
+}
+
+/*
+ApproverGroup คืนฝั่งของผู้อนุมัติตามแผนก: "GA", "HR" หรือว่างถ้าอนุมัติไม่ได้
+
+ดูแค่แผนก ยังไม่ดูตำแหน่ง ใช้คู่กับ IsApproverPosition
+*/
+func ApproverGroup(section string) string {
+	switch {
+	case contains(GASections, section):
+		return "GA"
+	case contains(HRSections, section):
+		return "HR"
+	}
+	return ""
+}
+
+// CanApprovePointAdjust คืนฝั่งที่อนุมัติได้ และบอกว่าอนุมัติได้หรือไม่
+//
+// ต้องผ่านทั้งสองอย่าง: อยู่ฝั่ง GA หรือ HR และตำแหน่งตั้งแต่ Chief Officer ขึ้นไป
+func CanApprovePointAdjust(section, position string) (string, bool) {
+	group := ApproverGroup(section)
+	if group == "" || !IsApproverPosition(position) {
+		return "", false
+	}
+	return group, true
 }
