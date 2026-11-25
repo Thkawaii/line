@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../../lib/api';
 import MobileShell from '../../components/MobileShell';
-import { Avatar } from '../../components/ui';
+import { Avatar, Modal, Notice, useToast } from '../../components/ui';
 import TierProgress from '../../components/TierProgress';
 import { Icon } from '../../components/icons';
 import { useAuth } from '../../context/AuthContext';
@@ -24,6 +24,7 @@ export default function Profile() {
   const navigate = useNavigate();
   const t = useT();
   const [progress, setProgress] = useState(null);
+  const [passwordOpen, setPasswordOpen] = useState(false);
 
   useEffect(() => {
     api.tiers().then(setProgress).catch(() => setProgress({ tierTarget: null, nextTier: null }));
@@ -86,6 +87,21 @@ export default function Profile() {
               </span>
             </Link>
           ))}
+
+          {/* เปลี่ยนรหัสผ่านเองได้ ไม่ต้องรอผู้ดูแลตั้งให้
+              อยู่ในเมนูเดียวกับรายการอื่นเพื่อให้หาเจอที่เดิมที่คนเคยหา */}
+          <button
+            onClick={() => setPasswordOpen(true)}
+            className="flex w-full items-center gap-3 px-4 py-3.5 text-left hover:bg-primary-wash"
+          >
+            <span className="text-primary">
+              <Icon.Lock size={20} />
+            </span>
+            <span className="flex-1 text-[15px] text-slate">{t('profile.changePassword')}</span>
+            <span className="text-muted">
+              <Icon.Next size={18} />
+            </span>
+          </button>
         </nav>
 
         <button
@@ -98,6 +114,93 @@ export default function Profile() {
           <Icon.Logout size={18} /> {t('profile.logout')}
         </button>
       </div>
+
+      <ChangePasswordModal open={passwordOpen} onClose={() => setPasswordOpen(false)} />
     </MobileShell>
+  );
+}
+
+/*
+หน้าต่างเปลี่ยนรหัสผ่านของตัวเอง
+
+ถามรหัสเดิมด้วยเสมอ แม้จะล็อกอินอยู่แล้ว เพราะเครื่องที่เปิดทิ้งไว้
+คือเครื่องที่ใครก็เดินมาเปลี่ยนรหัสล็อกเจ้าตัวออกได้
+
+ให้พิมพ์รหัสใหม่สองครั้ง เพราะช่องรหัสผ่านมองไม่เห็นสิ่งที่พิมพ์
+พิมพ์ผิดครั้งเดียวแล้วกดบันทึก คือล็อกตัวเองออกจากระบบทันที
+*/
+function ChangePasswordModal({ open, onClose }) {
+  const t = useT();
+  const toast = useToast();
+  const [form, setForm] = useState({ current: '', next: '', confirm: '' });
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setForm({ current: '', next: '', confirm: '' });
+      setError('');
+    }
+  }, [open]);
+
+  async function submit(event) {
+    event.preventDefault();
+    setError('');
+
+    if (form.next !== form.confirm) {
+      setError(t('profile.passwordMismatch'));
+      return;
+    }
+
+    setBusy(true);
+    try {
+      await api.changePassword({ currentPassword: form.current, newPassword: form.next });
+      toast(t('profile.passwordChanged'), 'primary');
+      onClose();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const fields = [
+    ['current', t('profile.currentPassword')],
+    ['next', t('profile.newPassword')],
+    ['confirm', t('profile.confirmPassword')],
+  ];
+
+  return (
+    <Modal open={open} onClose={onClose} size="sm">
+      <form onSubmit={submit} className="p-6">
+        <h2 className="pr-10 text-lg font-bold text-ink">{t('profile.changePassword')}</h2>
+
+        {error && (
+          <div className="mt-3">
+            <Notice>{error}</Notice>
+          </div>
+        )}
+
+        {fields.map(([key, label], index) => (
+          <div key={key}>
+            <label className={`label ${index === 0 ? 'mt-4' : 'mt-3'}`} htmlFor={`pw-${key}`}>
+              {label}
+            </label>
+            <input
+              id={`pw-${key}`}
+              type="password"
+              className="field"
+              autoComplete={key === 'current' ? 'current-password' : 'new-password'}
+              value={form[key]}
+              onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+              required
+            />
+          </div>
+        ))}
+        <button type="submit" disabled={busy} className="btn-primary mt-5 w-full">
+          {t('profile.savePassword')}
+        </button>
+      </form>
+    </Modal>
   );
 }

@@ -4,11 +4,20 @@ import { api } from '../../lib/api';
 import AdminShell from '../../components/AdminShell';
 import { Select } from '../../components/ComboBox';
 import SpecialPoints, { SpecialPointIcon } from '../../components/SpecialPoints';
-import { Badge, ImagePlaceholder, Modal, Notice, Spinner, useToast } from '../../components/ui';
+import {
+  Badge,
+  ImagePlaceholder,
+  Modal,
+  Notice,
+  Pagination,
+  SearchInput,
+  Spinner,
+  useToast,
+} from '../../components/ui';
 import ImageCropper from '../../components/ImageCropper';
 import TranslatedFields from '../../components/TranslatedFields';
 import { Icon } from '../../components/icons';
-import { dateTime, num } from '../../lib/format';
+import { dateTime, num, thaiDate } from '../../lib/format';
 
 // ช่องที่แปลได้ ใช้ทั้งในฟอร์มและตอนส่งขึ้น API
 const TEXT_FIELDS = [
@@ -236,10 +245,25 @@ export default function AdminRewards() {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState(null);
 
+  /*
+    ตัวกรองของแท็บรายการแลก
+
+    แยก page ออกจากตัวกรองอื่น เพราะทุกครั้งที่เปลี่ยนตัวกรองต้องเด้งกลับหน้าแรก
+    ไม่งั้นผู้ดูแลที่อยู่หน้า 5 แล้วกรองจนเหลือ 3 รายการ จะเห็นตารางว่าง
+  */
+  const [filters, setFilters] = useState({ q: '', department: 'all', branch: 'all', date: 'all' });
+  const [page, setPage] = useState(1);
+  const [detail, setDetail] = useState(null);
+
+  const setFilter = (key) => (value) => {
+    setPage(1);
+    setFilters((f) => ({ ...f, [key]: value }));
+  };
+
   const loadRewards = useCallback(() => api.adminRewards().then(({ rewards }) => setRewards(rewards)), []);
   const loadRedemptions = useCallback(
-    () => api.adminRedemptions(status).then(({ redemptions }) => setRedemptions(redemptions)),
-    [status]
+    () => api.adminRedemptions({ ...filters, status, page, limit: 10 }).then(setRedemptions),
+    [filters, status, page]
   );
 
   useEffect(() => {
@@ -248,13 +272,28 @@ export default function AdminRewards() {
 
   useEffect(() => {
     setRedemptions(null);
-    loadRedemptions();
-  }, [loadRedemptions]);
+    // หน่วงตอนพิมพ์ค้นหา จะได้ไม่ยิงคำขอทุกตัวอักษร
+    const timer = setTimeout(loadRedemptions, filters.q ? 250 : 0);
+    return () => clearTimeout(timer);
+  }, [loadRedemptions, filters.q]);
 
   async function markReceived(id) {
     try {
       await api.adminReceiveRedemption(id);
       toast('ยืนยันการรับของแล้ว', 'primary');
+      setDetail(null);
+      loadRedemptions();
+    } catch (err) {
+      toast(err.message);
+    }
+  }
+
+  // สแกนผิดคนแล้วกดคืนได้ ตอนยืนยันรับของเกิดขึ้นเร็วมากตรงหน้าเคาน์เตอร์
+  async function revert(id) {
+    try {
+      await api.adminRevertRedemption(id);
+      toast('คืนสถานะเป็นรอรับของแล้ว', 'primary');
+      setDetail(null);
       loadRedemptions();
     } catch (err) {
       toast(err.message);
@@ -368,82 +407,274 @@ export default function AdminRewards() {
           )}
         </section>
       ) : (
-        <section className="card overflow-hidden">
-          <div className="flex items-center gap-3 p-4">
-            {[
-              { value: 'pending', label: 'รอรับของ' },
-              { value: 'received', label: 'รับแล้ว' },
-              { value: 'all', label: 'ทั้งหมด' },
-            ].map((item) => (
-              <button
-                key={item.value}
-                onClick={() => setStatus(item.value)}
-                className={`chip ${status === item.value ? 'chip-on' : ''}`}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-
-          {!redemptions ? (
-            <Spinner />
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr>
-                    <th className="th">ลำดับ</th>
-                    <th className="th">ชื่อ-สกุล</th>
-                    <th className="th">แผนก</th>
-                    <th className="th">ของรางวัล</th>
-                    <th className="th">แต้มที่ใช้</th>
-                    <th className="th">เวลาแลก</th>
-                    <th className="th">สถานะ</th>
-                    <th className="th" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {redemptions.map((row, index) => (
-                    <tr key={row.id}>
-                      <td className="td">{index + 1}</td>
-                      <td className="td">{row.display_name}</td>
-                      <td className="td">{row.department}</td>
-                      <td className="td max-w-xs truncate">{row.reward_name}</td>
-                      <td className="td">{num(row.points_used)}</td>
-                      <td className="td">{dateTime(row.redeemed_at)}</td>
-                      <td className="td">
-                        <Badge
-                          className={
-                            row.status === 'received' ? 'bg-success-wash text-success' : 'bg-gold-wash text-gold-ink'
-                          }
-                        >
-                          {row.status === 'received' ? 'รับสินค้าแล้ว' : 'รอรับของ'}
-                        </Badge>
-                      </td>
-                      <td className="td">
-                        {row.status === 'pending' && (
-                          <button onClick={() => markReceived(row.id)} className="btn-primary btn-sm">
-                            ยืนยันรับของ
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                  {redemptions.length === 0 && (
-                    <tr>
-                      <td className="td text-center text-muted" colSpan={8}>
-                        ไม่มีรายการในสถานะนี้
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
+        <Redemptions
+          data={redemptions}
+          filters={filters}
+          setFilter={setFilter}
+          status={status}
+          onStatus={(value) => {
+            setPage(1);
+            setStatus(value);
+          }}
+          page={page}
+          onPage={setPage}
+          onOpen={setDetail}
+        />
       )}
+
+      <RedemptionDetail
+        row={detail}
+        onClose={() => setDetail(null)}
+        onReceive={markReceived}
+        onRevert={revert}
+      />
 
       <RewardForm open={formOpen} editing={editing} onClose={() => setFormOpen(false)} onSaved={loadRewards} />
     </AdminShell>
+  );
+}
+
+/* ---------- แท็บรายการแลกของ ---------- */
+
+const STATUS_STYLE = {
+  pending: { label: 'รอรับ', className: 'bg-gold-wash text-gold-ink' },
+  received: { label: 'รับแล้ว', className: 'bg-success-wash text-success' },
+  cancelled: { label: 'ยกเลิก', className: 'bg-danger-wash text-danger' },
+};
+
+const DATE_OPTIONS = [
+  { value: 'all', label: 'ทั้งหมด' },
+  { value: 'today', label: 'วันนี้' },
+  { value: 'week', label: '7 วันล่าสุด' },
+  { value: 'month', label: 'เดือนนี้' },
+];
+
+function Redemptions({ data, filters, setFilter, status, onStatus, page, onPage, onOpen }) {
+  const counts = data?.counts || {};
+
+  /*
+    ชิปสถานะโชว์จำนวนของทุกอันพร้อมกัน ไม่ใช่เฉพาะอันที่เลือกอยู่
+
+    ผู้ดูแลเปิดหน้านี้มาเพื่อดูว่ามีของค้างส่งกี่ชิ้น ถ้าต้องกดไล่ทีละชิป
+    ถึงจะเห็นตัวเลข ก็เท่ากับต้องถามคำถามเดิมสี่รอบ
+
+    ตัวเลขนับตามตัวกรองอื่นที่เปิดอยู่ (ค้นหา แผนก สาขา วันที่)
+    เลขบนชิปจึงหมายถึง "ในขอบเขตที่กรองอยู่ตอนนี้ มีสถานะละกี่รายการ"
+  */
+  const chips = [
+    { value: 'pending', label: 'รอรับ', count: counts.pending },
+    { value: 'received', label: 'รับแล้ว', count: counts.received },
+    { value: 'cancelled', label: 'ยกเลิก', count: counts.cancelled },
+    { value: 'all', label: 'ทั้งหมด', count: counts.all },
+  ];
+
+  return (
+    <section className="card overflow-hidden">
+      <div className="space-y-3 p-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="min-w-[260px] flex-1">
+            <SearchInput
+              value={filters.q}
+              onChange={setFilter('q')}
+              placeholder="กรอกรหัสอ้างอิง หรือรหัสพนักงาน"
+            />
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-slate">
+          <label className="flex items-center gap-2">
+            แผนก
+            <div className="w-36">
+              <Select
+                options={[
+                  { value: 'all', label: 'ทั้งหมด' },
+                  ...(data?.departments || []).map((name) => ({ value: name, label: name })),
+                ]}
+                value={filters.department}
+                onChange={setFilter('department')}
+              />
+            </div>
+          </label>
+
+          <label className="flex items-center gap-2">
+            สาขา
+            <div className="w-32">
+              <Select
+                options={[
+                  { value: 'all', label: 'ทั้งหมด' },
+                  ...(data?.branches || []).map((name) => ({ value: name, label: name })),
+                ]}
+                value={filters.branch}
+                onChange={setFilter('branch')}
+              />
+            </div>
+          </label>
+
+          <label className="flex items-center gap-2">
+            วันที่แลก
+            <div className="w-36">
+              <Select options={DATE_OPTIONS} value={filters.date} onChange={setFilter('date')} />
+            </div>
+          </label>
+
+          {/* ปุ่มรีเซ็ตโผล่เฉพาะตอนมีอะไรให้รีเซ็ตจริง
+              ปุ่มที่กดแล้วไม่เกิดอะไรขึ้นสอนให้คนเลิกเชื่อปุ่ม */}
+          {(filters.q || filters.department !== 'all' || filters.branch !== 'all' || filters.date !== 'all') && (
+            <button
+              onClick={() => {
+                setFilter('q')('');
+                setFilter('department')('all');
+                setFilter('branch')('all');
+                setFilter('date')('all');
+              }}
+              className="ml-auto flex items-center gap-1.5 text-primary"
+            >
+              <Icon.Refresh size={16} /> รีเซ็ต
+            </button>
+          )}
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          {chips.map((chip) => (
+            <button
+              key={chip.value}
+              onClick={() => onStatus(chip.value)}
+              className={`chip ${status === chip.value ? 'chip-on' : ''}`}
+            >
+              {chip.label}
+              {chip.count != null && ` (${num(chip.count)})`}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {!data ? (
+        <Spinner />
+      ) : (
+        <>
+          <div className="overflow-x-auto border-t border-line">
+            <table className="w-full">
+              <thead>
+                <tr>
+                  <th className="th">วันที่แลก</th>
+                  <th className="th">รหัสอ้างอิง</th>
+                  <th className="th">พนักงาน</th>
+                  <th className="th">แผนก</th>
+                  <th className="th">สาขา</th>
+                  <th className="th">ของรางวัล</th>
+                  <th className="th">สถานะ</th>
+                  <th className="th" />
+                </tr>
+              </thead>
+              <tbody>
+                {data.redemptions.map((row) => {
+                  const style = STATUS_STYLE[row.status] || STATUS_STYLE.pending;
+                  return (
+                    <tr
+                      key={row.id}
+                      onClick={() => onOpen(row)}
+                      className="cursor-pointer hover:bg-page"
+                    >
+                      <td className="td whitespace-nowrap">{thaiDate(row.redeemed_at)}</td>
+                      <td className="td whitespace-nowrap font-medium tabular-nums">{row.ref_code}</td>
+                      <td className="td">
+                        {row.display_name}
+                        <span className="ml-1.5 text-2xs text-muted">{row.employee_code}</span>
+                      </td>
+                      <td className="td">{row.department || '-'}</td>
+                      <td className="td">{row.branch || '-'}</td>
+                      <td className="td max-w-xs truncate">{row.reward_name}</td>
+                      <td className="td">
+                        <Badge className={style.className}>{style.label}</Badge>
+                      </td>
+                      <td className="td text-muted">
+                        <Icon.Next size={18} />
+                      </td>
+                    </tr>
+                  );
+                })}
+                {data.redemptions.length === 0 && (
+                  <tr>
+                    <td className="td text-center text-muted" colSpan={8}>
+                      ไม่พบรายการแลกของตามเงื่อนไขนี้
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="border-t border-line">
+            <Pagination page={page} total={data.total} limit={data.limit} onChange={onPage} />
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+/*
+หน้าต่างรายละเอียดของรายการแลกหนึ่งใบ
+
+เปิดจากการกดที่แถว เพราะตารางกว้างอยู่แล้ว ยัดทุกอย่างลงไปในแถวจะอ่านไม่ออก
+ตรงนี้คือที่ที่ผู้ดูแลยืนยันการรับของ จึงโชว์รหัสอ้างอิงตัวใหญ่ไว้เทียบกับที่พนักงานยื่นมา
+*/
+function RedemptionDetail({ row, onClose, onReceive, onRevert }) {
+  const style = STATUS_STYLE[row?.status] || STATUS_STYLE.pending;
+
+  return (
+    <Modal open={!!row} onClose={onClose} size="sm">
+      {row && (
+        <div className="p-6">
+          <div className="flex items-start gap-3">
+            <ImagePlaceholder src={row.image_url} className="h-20 w-20 shrink-0 rounded-[8px]" />
+            <div className="min-w-0 flex-1">
+              <Badge className={style.className}>{style.label}</Badge>
+              <h2 className="mt-1.5 font-bold leading-snug text-ink">{row.reward_name}</h2>
+              <p className="mt-1 text-2xs text-muted">
+                ใช้ไป {num(row.points_used)}{' '}
+                {row.point_kind === 'special' ? 'คะแนนพิเศษ' : 'คะแนน'}
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-4 rounded-card bg-page px-3 py-2.5">
+            <p className="text-2xs text-muted">รหัสอ้างอิง</p>
+            <p className="text-lg font-bold tabular-nums text-ink">{row.ref_code}</p>
+          </div>
+
+          <dl className="mt-4 space-y-1.5 text-sm">
+            {[
+              ['พนักงาน', `${row.display_name} (${row.employee_code})`],
+              ['ตำแหน่ง', row.position || '-'],
+              ['แผนก / สาขา', `${row.department || '-'} · ${row.branch || '-'}`],
+              ['วันที่แลก', dateTime(row.redeemed_at)],
+              ['วันที่รับของ', row.received_at ? dateTime(row.received_at) : 'ยังไม่ได้รับ'],
+            ].map(([label, value]) => (
+              <div key={label} className="flex gap-3">
+                <dt className="w-28 shrink-0 text-muted">{label}</dt>
+                <dd className="flex-1 text-ink">{value}</dd>
+              </div>
+            ))}
+          </dl>
+
+          <div className="mt-5 flex gap-2">
+            <button onClick={onClose} className="btn-ghost flex-1">
+              ปิด
+            </button>
+            {row.status === 'pending' && (
+              <button onClick={() => onReceive(row.id)} className="btn-primary flex-1">
+                ยืนยันรับของ
+              </button>
+            )}
+            {row.status === 'received' && (
+              <button onClick={() => onRevert(row.id)} className="btn-ghost flex-1">
+                คืนเป็นรอรับของ
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </Modal>
   );
 }

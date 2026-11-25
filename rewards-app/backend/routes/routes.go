@@ -27,6 +27,8 @@ func Setup() *http.ServeMux {
 	mux.HandleFunc("POST /api/auth/login", controllers.Login)
 	mux.HandleFunc("GET /api/auth/me", middleware.RequireAuth(controllers.Me))
 	mux.HandleFunc("POST /api/auth/accept-terms", middleware.RequireAuth(controllers.AcceptTerms))
+	// เปลี่ยนรหัสผ่านของตัวเอง ต้องกรอกรหัสเดิมมาด้วย ไม่ใช่แค่ล็อกอินอยู่
+	mux.HandleFunc("POST /api/auth/change-password", middleware.RequireAuth(controllers.ChangePassword))
 
 	/* ฝั่งพนักงาน */
 	user := func(pattern string, handler http.HandlerFunc) {
@@ -41,6 +43,26 @@ func Setup() *http.ServeMux {
 	user("GET /api/app/rewards", controllers.Rewards)
 	user("POST /api/app/rewards/{id}/redeem", controllers.RedeemReward)
 	user("GET /api/app/my-rewards", controllers.MyRewards)
+
+	/*
+		QR ที่พนักงานยื่นให้เจ้าหน้าที่สแกน
+
+		qr-token          QR ประจำตัว ใช้เช็คอินเข้ากิจกรรม
+		my-rewards/{id}/qr QR ของรางวัลที่แลกไว้ ใช้ตอนมารับของ
+
+		ทั้งคู่มีอายุสั้นและเซ็นกำกับ ออกให้เฉพาะเจ้าของบัญชีที่เรียกเท่านั้น
+	*/
+	/*
+		ป็อปอัปแจ้งพนักงานว่าคะแนนถูกปรับ
+
+		เด้งครั้งเดียวต่อหนึ่งรายการ จำที่ฐานข้อมูลไม่ใช่ที่เครื่อง
+		เปลี่ยนเครื่องหรือล้างแคชแล้วจึงไม่โดนเด้งซ้ำเรื่องเดิม
+	*/
+	user("GET /api/app/point-alerts", controllers.PointAlerts)
+	user("POST /api/app/point-alerts/ack", controllers.AckPointAlerts)
+
+	user("GET /api/app/qr-token", controllers.QrToken)
+	user("GET /api/app/my-rewards/{id}/qr", controllers.RedemptionQr)
 	user("GET /api/app/favorites", controllers.Favorites)
 	user("POST /api/app/favorites/toggle", controllers.ToggleFavorite)
 	user("GET /api/app/notifications", controllers.Notifications)
@@ -94,6 +116,14 @@ func Setup() *http.ServeMux {
 
 	office("GET /api/admin/redemptions", controllers.AdminRedemptions)
 	office("POST /api/admin/redemptions/{id}/receive", controllers.AdminReceiveRedemption)
+	// สแกนผิดคนแล้วกดคืนได้ ตอนยืนยันรับของเกิดขึ้นเร็วมากตรงหน้าเคาน์เตอร์
+	office("POST /api/admin/redemptions/{id}/revert", controllers.AdminRevertRedemption)
+
+	/*
+		เครื่องสแกนกลาง รับทั้ง QR ประจำตัวพนักงานและ QR ของรางวัลในเส้นทางเดียว
+		ผู้ดูแลถือมือถือเครื่องเดียวแล้วสแกนอะไรก็ได้ ระบบแยกแยะให้เอง
+	*/
+	office("POST /api/admin/scan", controllers.AdminScan)
 
 	// ดูรายการกิจกรรมได้ แต่สร้าง/แก้ไข/เช็คอิน ยังเป็นของผู้ดูแลระบบเท่านั้น
 	office("POST /api/admin/events", controllers.AdminCreateEvent)
@@ -175,15 +205,20 @@ func Setup() *http.ServeMux {
 	office("GET /api/admin/surveys/{id}/pending", controllers.AdminSurveyPending)
 	office("GET /api/admin/surveys/{id}/responses", controllers.AdminSurveyResponses)
 	/*
-		ปรับคะแนนด้วยมือ
+		ปรับคะแนนด้วยมือ — ยื่นคำขอแล้วรออนุมัติสองฝั่ง
 
-		ผ่าน RequireReport ก่อน (admin หรือ ga) แล้วตัวควบคุมจะเช็กตำแหน่งงานอีกชั้น
-		ด้วย CanAdjustPoints — ต้องเป็น admin หรือมีตำแหน่งตั้งแต่ Chief Engineer ขึ้นไป
+		ชั้นแรกผ่าน RequireOffice (แผนกหลังบ้าน) ชั้นที่สองตัวควบคุมเช็กเอง
+		  ยื่นคำขอ  ต้องอยู่แผนก ER, GA หรือ HR — ทุกตำแหน่ง
+		  อนุมัติ   ต้องอยู่ฝั่ง GA หรือ HR และตำแหน่งตั้งแต่ Chief Officer ขึ้นไป
+		            ต้องครบทั้งสองฝั่ง คะแนนถึงจะขยับ
 
-		ถ้าใช้ RequireAdmin ตรงนี้ กติกาเรื่องตำแหน่งจะไม่มีผลกับใครเลย
+		ถ้าใช้ RequireAdmin ตรงนี้ กติกาเรื่องแผนกกับตำแหน่งจะไม่มีผลกับใครเลย
 		เพราะ admin ผ่านอยู่แล้วและคนอื่นถูกปฏิเสธตั้งแต่ชั้นแรก
 	*/
 	office("POST /api/admin/points/adjust", controllers.AdminAdjustPoints)
+	office("GET /api/admin/points/requests", controllers.AdminPointRequests)
+	office("POST /api/admin/points/requests/{id}/decide", controllers.AdminDecidePointRequest)
+	office("POST /api/admin/points/requests/{id}/cancel", controllers.AdminCancelPointRequest)
 
 	office("GET /api/admin/announcements", controllers.AdminAnnouncements)
 	office("GET /api/admin/announcements/{id}/readers", controllers.AdminAnnouncementReaders)

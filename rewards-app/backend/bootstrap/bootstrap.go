@@ -110,7 +110,9 @@ func settings() error {
 		('reward_redeemed','แลกรางวัลสำเร็จ','แจ้งเตือนเมื่อแลกรางวัลสำเร็จ',true,false,false,2),
 		('points_expiring','คะแนนใกล้หมดอายุ','แจ้งเตือนก่อนคะแนนหมดอายุ',true,true,true,3),
 		('event_starting','กิจกรรมใกล้เริ่ม','แจ้งเตือนก่อนกิจกรรมเริ่ม',true,false,true,4),
-		('reward_ready','รอรับรางวัล','แจ้งเตือนเมื่อของรางวัลพร้อมให้มารับ',false,true,true,5)
+		('reward_ready','รอรับรางวัล','แจ้งเตือนเมื่อของรางวัลพร้อมให้มารับ',false,true,true,5),
+		('special_points_expiring','คะแนนพิเศษใกล้หมดอายุ',
+		 'แจ้งเตือนพนักงานล่วงหน้าก่อนคะแนนพิเศษถูกตัดเหลือ 0',true,false,true,6)
 		ON CONFLICT (key) DO NOTHING`)
 }
 

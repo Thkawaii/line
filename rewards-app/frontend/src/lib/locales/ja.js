@@ -121,6 +121,13 @@ export default {
   'profile.menuFaq': 'よくある質問',
   'profile.menuTerms': '利用規約',
   'profile.logout': 'ログアウト',
+  'profile.changePassword': 'パスワードの変更',
+  'profile.currentPassword': '現在のパスワード',
+  'profile.newPassword': '新しいパスワード',
+  'profile.confirmPassword': '新しいパスワード（確認）',
+  'profile.passwordMismatch': '新しいパスワードが一致しません',
+  'profile.passwordChanged': 'パスワードを変更しました',
+  'profile.savePassword': '新しいパスワードを保存',
 
   'points.title': 'マイポイント',
   'points.id': 'ID',
@@ -159,6 +166,14 @@ export default {
   'myRewards.pickupHint':
     '総務人事部（GA&ER）でお受け取りください。',
   'myRewards.refCode': '参照番号',
+  'myRewards.showQr': 'QRコード',
+  'myRewards.qrTitle': '景品受け取り用QRコード',
+  'myRewards.qrExpiresIn': '残り時間が0になると無効です。タップして再取得できます',
+  'myRewards.qrHint': 'このQRコードを係員に提示して景品をお受け取りください',
+  'myRewards.qrExpired': 'QRコードの有効期限が切れました。タップして再取得してください',
+  'myRewards.copied': '参照コードをコピーしました',
+  'myRewards.copy': '参照コードをコピー',
+  'myRewards.qrImageAlt': '景品受け取り用QRコード',
 
   'notifications.title': 'お知らせ',
   'notifications.empty': '現在お知らせはありません',
@@ -230,9 +245,22 @@ export default {
   'news.acknowledge': 'お知らせを確認しました',
 
   /* 特別ポイント */
+  'pointAlert.badge': 'ポイント更新',
+  'pointAlert.title': 'ポイントが調整されました',
+  'pointAlert.added': 'ポイントが追加されました',
+  'pointAlert.deducted': 'ポイントが差し引かれました',
+  'pointAlert.item': '項目',
+  'pointAlert.reason': '理由',
+  'pointAlert.approvedBy': '承認者',
+  'pointAlert.ok': '確認しました',
+  'pointAlert.next': '確認しました（{{n}}/{{total}}）',
+  'pointAlert.seeHistory': 'ポイント履歴を見る',
   'points.special': '特別ポイント',
   'points.specialBalance': 'あなたの特別ポイント',
   'points.normal': '通常ポイント',
+  'points.specialExpireAt': '特別ポイント有効期限：{{date}}',
+  'points.specialExpiringSoon': '特別ポイントは{{date}}で失効・残り{{days}}日',
+  'points.specialExpiresToday': '本日が特別ポイント最終日です（{{date}}）',
   'rewards.useSpecial': '特別ポイントで交換',
 
   /* 登録時の位置確認 */

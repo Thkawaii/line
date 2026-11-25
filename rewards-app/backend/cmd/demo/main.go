@@ -80,6 +80,7 @@ func main() {
 	insertPointHistory()
 	insertRegistrations()
 	insertRedemptions()
+	insertPointRequests()
 	insertFeedback()
 	insertNotifications()
 	syncTiers()
@@ -366,6 +367,62 @@ func insertRedemptions() {
 		WHERE u.role = 'user' AND ` + demoUser + ` AND u.employee_code LIKE '22%'
 		  AND (u.employee_code::int % 3) = 0
 		  AND r.id = (SELECT min(id) FROM rewards WHERE point_kind = 'point' AND status = 'active')
+		ON CONFLICT DO NOTHING`)
+
+	// ใส่รายการที่ยกเลิกไว้ด้วย ชิป "ยกเลิก" ในหน้ารายการแลกจะได้ไม่เป็นศูนย์ตลอด
+	// และได้เห็นว่าสีกับป้ายสถานะแสดงถูกต้อง
+	exec(`
+		UPDATE redemptions SET status = 'cancelled', received_at = NULL
+		WHERE id IN (SELECT id FROM redemptions WHERE status = 'pending' ORDER BY id LIMIT 2)`)
+}
+
+/*
+คำขอปรับคะแนนที่รออนุมัติ
+
+ใส่ไว้ใบหนึ่งที่ยังไม่มีใครลงชื่อ และอีกใบที่ฝั่ง GA อนุมัติแล้วรอฝั่ง HR
+ผู้ทดสอบจะได้เห็นทั้งสถานะ "ยังไม่มีใครดู" และ "ขาดอีกฝั่งเดียว" โดยไม่ต้องสร้างเอง
+
+ผูกกับพนักงานที่มีอยู่แล้วเท่านั้น ถ้าหาคนในแผนกที่กำหนดไม่เจอก็ข้ามไปเงียบ ๆ
+ข้อมูลตัวอย่างไม่ควรทำให้การเตรียมข้อมูลทั้งชุดล้ม
+*/
+func insertPointRequests() {
+	exec(`
+		INSERT INTO point_adjustment_requests
+		  (user_id, requested_by, points, point_kind, title, reason, created_at)
+		SELECT t.id, a.id, 150, 'point', 'ชดเชยคะแนนกิจกรรมที่ระบบไม่บันทึก',
+		       $1,
+		       now() - interval '2 days'
+		FROM (SELECT id FROM users WHERE role = 'user' ORDER BY id LIMIT 1) t
+		CROSS JOIN (SELECT id FROM users
+		            WHERE department = ANY(ARRAY['ER','ERG','GA','GAG','HR','HRM','HRD'])
+		            ORDER BY id LIMIT 1) a
+		ON CONFLICT DO NOTHING`,
+		marker+" พนักงานมาร่วมงานจริงแต่สแกน QR ไม่ติดหน้างาน มีรูปถ่ายหมู่ยืนยัน")
+
+	exec(`
+		INSERT INTO point_adjustment_requests
+		  (user_id, requested_by, points, point_kind, title, reason, created_at)
+		SELECT t.id, a.id, -200, 'point', 'หักคืนคะแนนที่จ่ายซ้ำ',
+		       $1, now() - interval '1 day'
+		FROM (SELECT id FROM users WHERE role = 'user' ORDER BY id OFFSET 1 LIMIT 1) t
+		CROSS JOIN (SELECT id FROM users
+		            WHERE department = ANY(ARRAY['ER','ERG','GA','GAG','HR','HRM','HRD'])
+		            ORDER BY id LIMIT 1) a
+		ON CONFLICT DO NOTHING`,
+		marker+" ระบบจ่ายคะแนนกิจกรรมเดียวกันสองรอบจากการสแกนซ้ำ ตรวจสอบแล้วตามรายงาน")
+
+	// ใบล่าสุดให้ฝั่ง GA ลงชื่อไว้แล้ว เหลือรอ HR อีกฝั่งเดียว
+	exec(`
+		INSERT INTO point_adjustment_approvals (request_id, approver_id, approver_group, decision, note)
+		SELECT q.id, g.id, 'GA', 'approve', 'ตรวจกับรายงานการสแกนแล้ว ซ้ำจริง'
+		FROM (SELECT id FROM point_adjustment_requests
+		      WHERE status = 'pending' ORDER BY id DESC LIMIT 1) q
+		CROSS JOIN (SELECT id FROM users
+		            WHERE department = ANY(ARRAY['GA','GAG'])
+		              AND position = ANY(ARRAY['Director','Co-General Manager',
+		                'Assistant General Manager','Co-Manager','Manager','Assistant Manager',
+		                'Specialist','Chief Engineer','Senior Engineer','Engineer','Chief Officer'])
+		            ORDER BY id LIMIT 1) g
 		ON CONFLICT DO NOTHING`)
 }
 
@@ -754,6 +811,17 @@ func givePoints() {
 		SELECT id, 'earn', 'event', $1, 450, 'special', now() - interval '5 days'
 		FROM users WHERE employee_code = '2105'`,
 		marker+" คะแนนพิเศษจากกิจกรรมครบรอบบริษัท")
+
+	// 2106 มีคะแนนพิเศษที่เหลืออีก 7 วัน ไว้ดูป้ายเตือน "ใกล้หมดอายุ"
+	// และใบแจ้งเตือนล่วงหน้า โดยไม่ต้องนั่งแก้วันในฐานข้อมูลเอง
+	exec(`UPDATE users SET special_points = 120, special_points_expire_at = CURRENT_DATE + 7
+	      WHERE employee_code = '2106'`)
+
+	exec(`
+		INSERT INTO point_transactions (user_id, kind, source, title, points, point_kind, created_at)
+		SELECT id, 'earn', 'event', $1, 120, 'special', now() - interval '20 days'
+		FROM users WHERE employee_code = '2106'`,
+		marker+" คะแนนพิเศษจากกิจกรรมครบรอบบริษัท")
 }
 
 func clear() {
@@ -765,6 +833,16 @@ func clear() {
 func wipe() {
 	exec(`DELETE FROM event_feedback`)
 	exec(`DELETE FROM redemptions`)
+	/*
+		ลบเฉพาะคำขอที่คำสั่งนี้สร้างไว้เอง ไม่ใช่ทั้งตาราง
+
+		คำขอปรับคะแนนกับรายชื่อผู้อนุมัติเป็นหลักฐานว่าใครอนุมัติให้ใครเมื่อไหร่
+		ไม่ใช่ข้อมูลตกแต่งหน้าจอแบบของรางวัลหรือแบนเนอร์
+		ถ้าเผลอสั่งใส่ข้อมูลทดสอบทับระบบที่ใช้งานจริง หลักฐานพวกนี้ต้องไม่หายไปด้วย
+
+		ตารางการอนุมัติตามไปเองด้วย ON DELETE CASCADE
+	*/
+	exec(`DELETE FROM point_adjustment_requests WHERE reason LIKE $1`, marker+"%")
 	exec(`DELETE FROM event_registrations`)
 	exec(`DELETE FROM favorites`)
 	exec(`DELETE FROM rewards`)
@@ -779,8 +857,10 @@ func wipe() {
 	// ลบเฉพาะพนักงานตัวอย่างของชุดนี้ (รหัสขึ้นต้นด้วย 21 หรือ 22) ไม่แตะบัญชีอื่น
 	exec(`DELETE FROM users WHERE role = 'user'
 	      AND (employee_code LIKE '21__' OR employee_code LIKE '22__')`)
+	// ล้างวันที่เคยเตือนไปแล้วด้วย ไม่งั้นใส่ข้อมูลทดสอบรอบใหม่แล้วใบแจ้งเตือนไม่ขึ้น
+	// เพราะระบบจำว่าเตือนวันหมดอายุเดิมไปแล้ว
 	exec(`UPDATE users SET points = 0, special_points = 0, special_points_expire_at = NULL,
-	      tier = 'Member' WHERE role = 'user'`)
+	      special_points_notified_for = NULL, tier = 'Member' WHERE role = 'user'`)
 }
 
 /*

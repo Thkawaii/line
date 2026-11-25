@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"strconv"
 
 	"rewards/config"
+	"rewards/store"
 )
 
 /*
@@ -221,11 +223,16 @@ func notifyTierUp(tx *sql.Tx, userID int64, tier string) error {
 // awardSpecialPoints บวกคะแนนพิเศษเข้าบัญชีพร้อมบันทึกรายการเดินบัญชี
 //
 // expireAt คือวันหมดอายุของคะแนนก้อนนี้ ส่ง nil มาได้ถ้าไม่กำหนด
+// eventID คือกิจกรรมต้นทาง ส่ง nil ถ้าเป็นการปรับคะแนนด้วยมือที่ไม่ได้มาจากกิจกรรม
+// เก็บไว้เพื่อให้กราฟการเคลื่อนไหวของคะแนนกรองดูเฉพาะกิจกรรมได้
+//
+// requestID คือคำขอปรับคะแนนที่อนุมัติแล้วซึ่งเป็นต้นทาง ส่ง nil ถ้ามาจากกิจกรรม
+// เก็บไว้เพื่อให้ย้อนดูได้ว่ารายการนี้ใครขอและใครอนุมัติ
 //
 // วันหมดอายุเก็บไว้ที่ผู้ใช้ค่าเดียว ไม่ได้แยกรายก้อน และจะ "เลื่อนออกไป" เสมอ
 // คือเก็บวันที่ไกลที่สุดไว้ เพราะพนักงานไม่ควรเสียคะแนนก้อนใหม่
 // เพียงเพราะก้อนเก่าใกล้หมดอายุ
-func awardSpecialPoints(tx *sql.Tx, userID int64, amount int, title string, expireAt any) error {
+func awardSpecialPoints(tx *sql.Tx, userID int64, amount int, title string, expireAt, eventID, requestID any) error {
 	if amount <= 0 {
 		return nil
 	}
@@ -243,8 +250,10 @@ func awardSpecialPoints(tx *sql.Tx, userID int64, amount int, title string, expi
 	}
 
 	if _, err := tx.Exec(`
-		INSERT INTO point_transactions (user_id, kind, source, title, points, point_kind)
-		VALUES ($1,'earn','event',$2,$3,'special')`, userID, title, amount); err != nil {
+		INSERT INTO point_transactions
+		  (user_id, kind, source, title, points, point_kind, event_id, adjust_request_id)
+		VALUES ($1,'earn','event',$2,$3,'special',$4,$5)`,
+		userID, title, amount, eventID, requestID); err != nil {
 		return err
 	}
 
@@ -312,4 +321,146 @@ func ExpireSpecialPoints(userID int64) (int, error) {
 		count++
 	}
 	return count, rows.Err()
+}
+
+/*
+NotifySpecialPointsExpiring เตือนล่วงหน้าก่อนคะแนนพิเศษจะถูกตัดเหลือ 0
+
+เดิมคะแนนพิเศษหายเงียบ ๆ ตอนพ้นวันหมดอายุ พนักงานเห็นยอดเป็น 0
+แล้วเข้าใจว่าระบบคำนวณผิด ทั้งที่ยังมีเวลาเอาไปแลกของรางวัลอยู่หลายวัน
+
+ล่วงหน้ากี่วันอ่านจากค่า expire_warn_days ในหน้าตั้งค่า (ค่าเริ่มต้น 30 วัน)
+ผู้ดูแลปิดการแจ้งเตือนนี้ได้ที่แท็บ Systems Event คีย์ special_points_expiring
+
+เตือนครั้งเดียวต่อหนึ่งวันหมดอายุ โดยจดวันที่เตือนไปแล้วไว้ที่
+users.special_points_notified_for ตัวตั้งเวลาวิ่งทุกชั่วโมงจึงไม่เตือนซ้ำ
+ถ้าภายหลังได้คะแนนก้อนใหม่ที่เลื่อนวันหมดอายุออกไป ค่าที่จดไว้จะไม่ตรงกับวันใหม่
+รอบถัดไปจะเตือนให้อีกครั้งเองตามวันใหม่
+
+userID = 0 คือตรวจให้ทุกคน
+*/
+func NotifySpecialPointsExpiring(userID int64) (int, error) {
+	if !notificationEnabled("special_points_expiring") {
+		return 0, nil
+	}
+
+	days, err := strconv.Atoi(setting("expire_warn_days", "30"))
+	if err != nil || days < 0 {
+		days = 30
+	}
+
+	args := []any{days}
+	filter := ""
+	if userID > 0 {
+		filter = " AND id = $2"
+		args = append(args, userID)
+	}
+
+	/*
+		เลือก จด และส่งแจ้งเตือน ในคำสั่งเดียวเพื่อให้เป็นอะตอมมิก
+		ถ้าแยกเป็นสามคำสั่งแล้วล้มกลางทาง จะได้ทั้งแบบจดว่าเตือนแล้วแต่ไม่ได้เตือน
+		และแบบเตือนซ้ำเพราะยังไม่ได้จด
+
+		วันที่เขียนเป็นแบบไทย (วัน/เดือน/ปี พ.ศ.) ให้ตรงกับที่แสดงในแอป
+	*/
+	rows, err := config.DB.Query(`
+		WITH warn AS (
+		  SELECT id, special_points, special_points_expire_at AS expire_at,
+		         (special_points_expire_at - CURRENT_DATE)::int AS days_left
+		  FROM users
+		  WHERE status = 'Active'
+		    AND special_points > 0
+		    AND special_points_expire_at IS NOT NULL
+		    AND special_points_expire_at >= CURRENT_DATE
+		    AND special_points_expire_at <= CURRENT_DATE + $1::int
+		    AND (special_points_notified_for IS NULL
+		         OR special_points_notified_for <> special_points_expire_at)`+filter+`
+		),
+		marked AS (
+		  UPDATE users u SET special_points_notified_for = w.expire_at
+		  FROM warn w WHERE u.id = w.id
+		)
+		INSERT INTO notifications (user_id, category, title, body)
+		SELECT id, 'point',
+		  CASE WHEN days_left = 0
+		    THEN 'วันนี้วันสุดท้ายของคะแนนพิเศษ'
+		    ELSE format('คะแนนพิเศษของคุณจะหมดอายุในอีก %s วัน', days_left) END,
+		  format('คะแนนพิเศษ %s คะแนนจะหมดอายุวันที่ %s %s รีบใช้แลกของรางวัลที่ใช้คะแนนพิเศษก่อนถูกตัดยอดเหลือ 0',
+		         special_points,
+		         to_char(expire_at, 'DD/MM/') || (extract(year from expire_at)::int + 543),
+		         CASE WHEN days_left = 0 THEN '(วันนี้)' ELSE format('(อีก %s วัน)', days_left) END)
+		FROM warn
+		RETURNING user_id`, args...)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	count := 0
+	for rows.Next() {
+		count++
+	}
+	return count, rows.Err()
+}
+
+/*
+withSpecialExpiry ติดธงว่าคะแนนพิเศษของคนนี้ใกล้หมดอายุแล้วหรือยัง
+
+คิวรีที่เรียกตัวนี้ต้องเลือก special_points_days_left (วันหมดอายุลบวันนี้) มาด้วย
+นับวันในฐานข้อมูลที่เดียว หน้าเว็บจึงไม่ต้องเดาเขตเวลาของเครื่องผู้ใช้
+ซึ่งเคยทำให้คนที่เปิดแอปข้ามเขตเวลาเห็นจำนวนวันเพี้ยนไปหนึ่งวัน
+
+special_points_expiring เป็นจริงเมื่อเหลือไม่เกินค่า expire_warn_days
+ใช้เกณฑ์เดียวกับใบแจ้งเตือน ป้ายบนหน้าแอปกับใบแจ้งเตือนจะได้ไม่ขัดกันเอง
+*/
+func withSpecialExpiry(user store.Row) store.Row {
+	if user == nil {
+		return user
+	}
+
+	user["special_points_expiring"] = false
+
+	points, _ := toInt64(user["special_points"])
+	days, ok := toInt64(user["special_points_days_left"])
+	if !ok || points <= 0 {
+		return user
+	}
+
+	warn, err := strconv.Atoi(setting("expire_warn_days", "30"))
+	if err != nil || warn < 0 {
+		warn = 30
+	}
+	if days >= 0 && days <= int64(warn) {
+		user["special_points_expiring"] = true
+	}
+	return user
+}
+
+// toInt64 อ่านตัวเลขจากค่าที่ไดรเวอร์ส่งกลับมา ซึ่งอาจเป็น int64 หรือ int แล้วแต่คอลัมน์
+func toInt64(value any) (int64, bool) {
+	switch v := value.(type) {
+	case int64:
+		return v, true
+	case int32:
+		return int64(v), true
+	case int:
+		return int64(v), true
+	case float64:
+		return int64(v), true
+	}
+	return 0, false
+}
+
+// notificationEnabled บอกว่าเทมเพลตแจ้งเตือนอัตโนมัติตัวนี้ยังเปิดใช้อยู่ไหม
+//
+// ถ้าไม่มีแถวนี้ในตาราง (ฐานข้อมูลเก่าที่ยังไม่ได้ต่อเติม) ถือว่าเปิด
+// เพราะการเงียบไปเฉย ๆ หาสาเหตุยากกว่าการแจ้งเตือนเกินมาหนึ่งใบ
+func notificationEnabled(key string) bool {
+	row, err := store.QueryOne(
+		`SELECT active AND in_app AS on FROM notification_events WHERE key = $1`, key)
+	if err != nil || row == nil {
+		return true
+	}
+	on, ok := row["on"].(bool)
+	return !ok || on
 }

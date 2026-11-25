@@ -8,7 +8,7 @@ import TierProgress from '../../components/TierProgress';
 import { dateRange, num, timeRange } from '../../lib/format';
 import { tierCard, tierCircle, tierIcon } from '../../lib/tier';
 import { useLanguage, useT } from '../../lib/i18n';
-import { SpecialPointIcon } from '../../components/SpecialPoints';
+import { SpecialExpiryNote, SpecialPointIcon } from '../../components/SpecialPoints';
 import LanguagePicker from '../../components/LanguagePicker';
 
 /**
@@ -112,6 +112,10 @@ export default function Home() {
             </span>
             <span className={`text-2xs ${theme.muted}`}>{t('points.special')}</span>
           </p>
+
+          {/* วันหมดอายุของคะแนนพิเศษ ขึ้นเป็นป้ายเตือนเองเมื่อใกล้ถึงกำหนด
+              หน้าแรกคือหน้าที่พนักงานเปิดบ่อยที่สุด เตือนตรงนี้จึงถึงตัวคนที่ยังไม่ได้เข้าไปดูหน้าคะแนน */}
+          <SpecialExpiryNote user={user} theme={theme} />
 
           <div className="mt-3">
             <TierProgress points={user.points} target={tierTarget} nextTier={nextTier} theme={theme} />

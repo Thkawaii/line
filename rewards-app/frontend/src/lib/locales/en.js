@@ -121,6 +121,13 @@ export default {
   'profile.menuFaq': 'FAQ',
   'profile.menuTerms': 'Terms and conditions',
   'profile.logout': 'Sign out',
+  'profile.changePassword': 'Change password',
+  'profile.currentPassword': 'Current password',
+  'profile.newPassword': 'New password',
+  'profile.confirmPassword': 'Confirm new password',
+  'profile.passwordMismatch': 'The two new password fields do not match',
+  'profile.passwordChanged': 'Password changed',
+  'profile.savePassword': 'Save new password',
 
   'points.title': 'My points',
   'points.id': 'ID',
@@ -159,6 +166,14 @@ export default {
   'myRewards.pickupHint':
     'Collect your reward at the General Affairs and Human Resources Department (GA&ER).',
   'myRewards.refCode': 'Reference code',
+  'myRewards.showQr': 'QR CODE',
+  'myRewards.qrTitle': 'QR code for collection',
+  'myRewards.qrExpiresIn': 'This QR expires when the timer runs out — tap to refresh',
+  'myRewards.qrHint': 'Show this QR code to staff to collect your reward',
+  'myRewards.qrExpired': 'QR code expired — tap to get a new one',
+  'myRewards.copied': 'Reference code copied',
+  'myRewards.copy': 'Copy reference code',
+  'myRewards.qrImageAlt': 'QR code for collecting your reward',
 
   'notifications.title': 'Notifications',
   'notifications.empty': 'No notifications right now',
@@ -230,9 +245,22 @@ export default {
   'news.acknowledge': 'I acknowledge this announcement',
 
   /* Special points */
+  'pointAlert.badge': 'Points updated',
+  'pointAlert.title': 'Your points were adjusted',
+  'pointAlert.added': 'Points were added to your account',
+  'pointAlert.deducted': 'Points were deducted from your account',
+  'pointAlert.item': 'Item',
+  'pointAlert.reason': 'Reason',
+  'pointAlert.approvedBy': 'Approved by',
+  'pointAlert.ok': 'Got it',
+  'pointAlert.next': 'Got it ({{n}}/{{total}})',
+  'pointAlert.seeHistory': 'View point history',
   'points.special': 'Special points',
   'points.specialBalance': 'Your special points',
   'points.normal': 'Regular points',
+  'points.specialExpireAt': 'Special points expire on {{date}}',
+  'points.specialExpiringSoon': 'Special points expire {{date}} · {{days}} days left',
+  'points.specialExpiresToday': 'Last day to use your special points ({{date}})',
   'rewards.useSpecial': 'Redeem with special points',
 
   /* Location check when registering */

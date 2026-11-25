@@ -62,9 +62,16 @@ func Home(w http.ResponseWriter, r *http.Request) {
 		log.Printf("ตัดยอดคะแนนพิเศษที่หมดอายุไม่สำเร็จ: %v", err)
 	}
 
+	// เตือนล่วงหน้าตั้งแต่ตอนเปิดแอป ไม่ต้องรอรอบถัดไปของตัวตั้งเวลา
+	// เตือนครั้งเดียวต่อวันหมดอายุหนึ่งวัน เปิดแอปกี่รอบก็ไม่ได้ใบซ้ำ
+	if _, err := NotifySpecialPointsExpiring(claims.ID); err != nil {
+		log.Printf("แจ้งเตือนคะแนนพิเศษใกล้หมดอายุไม่สำเร็จ: %v", err)
+	}
+
 	user, err := store.QueryOne(`
 		SELECT u.display_name, u.tier, u.points, u.special_points, u.points_expire_at,
-		       u.special_points_expire_at, t.color AS tier_color
+		       u.special_points_expire_at, t.color AS tier_color,
+		       (u.special_points_expire_at - CURRENT_DATE)::int AS special_points_days_left
 		FROM users u LEFT JOIN tiers t ON t.key = u.tier WHERE u.id = $1`, claims.ID)
 	if err != nil {
 		web.Fail(w, err)
@@ -75,6 +82,7 @@ func Home(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	withExpiry(user)
+	withSpecialExpiry(user)
 
 	lang := requestLanguage(r)
 
@@ -140,13 +148,15 @@ func Points(w http.ResponseWriter, r *http.Request) {
 
 	user, err := store.QueryOne(`
 		SELECT u.display_name, u.employee_code, u.tier, u.points, u.special_points,
-		       u.points_expire_at, u.special_points_expire_at, t.color AS tier_color
+		       u.points_expire_at, u.special_points_expire_at, t.color AS tier_color,
+		       (u.special_points_expire_at - CURRENT_DATE)::int AS special_points_days_left
 		FROM users u LEFT JOIN tiers t ON t.key = u.tier WHERE u.id = $1`, claims.ID)
 	if err != nil {
 		web.Fail(w, err)
 		return
 	}
 	withExpiry(user)
+	withSpecialExpiry(user)
 
 	recent, err := store.Query(`
 		SELECT id, kind, source, title, points, point_kind, created_at FROM point_transactions
@@ -418,9 +428,10 @@ func RegisterEvent(w http.ResponseWriter, r *http.Request) {
 		if kind != "vote" {
 			source = "event"
 		}
+		// เก็บกิจกรรมต้นทางไว้ด้วย กราฟการเคลื่อนไหวของคะแนนจะได้กรองดูเฉพาะกิจกรรมได้
 		if _, err := tx.Exec(`
-			INSERT INTO point_transactions (user_id, kind, source, title, points)
-			VALUES ($1,'earn',$4,$2,$3)`, claims.ID, title, awarded, source); err != nil {
+			INSERT INTO point_transactions (user_id, kind, source, title, points, event_id)
+			VALUES ($1,'earn',$4,$2,$3,$5)`, claims.ID, title, awarded, source, eventID); err != nil {
 			web.Fail(w, err)
 			return
 		}
@@ -439,7 +450,7 @@ func RegisterEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// คะแนนพิเศษจ่ายพร้อมกับคะแนนปกติเสมอ
-	if err := awardSpecialPoints(tx, claims.ID, specialPoints, title, specialExpire); err != nil {
+	if err := awardSpecialPoints(tx, claims.ID, specialPoints, title, specialExpire, eventID, nil); err != nil {
 		web.Fail(w, err)
 		return
 	}

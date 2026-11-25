@@ -140,7 +140,6 @@ function TopicForm({ open, editing, onClose, onSaved }) {
               value={form.title}
               onChange={set('title')}
               required
-              placeholder="ข้อมูลพนักงานลงทะเบียน Line OA"
             />
             {/* ชื่อนี้ถูกใช้เป็นหัวคอลัมน์กลางตารางในไฟล์ Excel ด้วย จึงอธิบายไว้ให้เห็น */}
             <p className="mt-1 text-2xs text-muted">
@@ -157,7 +156,6 @@ function TopicForm({ open, editing, onClose, onSaved }) {
               className="field"
               value={form.heading}
               onChange={set('heading')}
-              placeholder="สรุปจำนวนข้อมูลพนักงานลงทะเบียนใช้ Line OA"
             />
           </div>
 

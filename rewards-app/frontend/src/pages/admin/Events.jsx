@@ -192,6 +192,15 @@ function EventForm({ open, editing, onClose, onSaved }) {
 
   async function submit(event) {
     event.preventDefault();
+
+    // กันไว้อีกชั้นเผื่อเบราว์เซอร์ไม่บังคับ required ของ input ที่เพิ่งถูกแสดง
+    // ฝั่งเซิร์ฟเวอร์ตรวจซ้ำอยู่แล้ว แต่บอกตรงนี้ผู้ดูแลไม่ต้องรอรอบไป-กลับ
+    const special = Number(form.specialPoints || 0);
+    if (special > 0 && !form.specialPointsExpireAt) {
+      setError('กิจกรรมที่ให้คะแนนพิเศษต้องระบุวันหมดอายุของคะแนนพิเศษ');
+      return;
+    }
+
     const payload = {
       ...form,
       // ส่งตัวเลือกเฉพาะกิจกรรมโหวต กิจกรรมแบบลงทะเบียนส่ง null เพื่อไม่ให้ไปแตะของเดิม
@@ -199,8 +208,9 @@ function EventForm({ open, editing, onClose, onSaved }) {
       // ส่งค่าว่างไปด้วยเพื่อให้ล้างวันสิ้นสุดได้ ไม่ใช่แค่ตั้งใหม่
       endDate: form.endDate || '',
       points: Number(form.points || 0),
-      specialPoints: Number(form.specialPoints || 0),
-      specialPointsExpireAt: form.specialPointsExpireAt || '',
+      specialPoints: special,
+      // ไม่ให้คะแนนพิเศษแล้วก็ไม่ต้องเก็บวันหมดอายุค้างไว้
+      specialPointsExpireAt: special > 0 ? form.specialPointsExpireAt : '',
       // ส่ง null เมื่อเว้นว่าง = เลิกตรวจตำแหน่ง
       venueLat: form.venueLat === '' ? null : Number(form.venueLat),
       venueLng: form.venueLng === '' ? null : Number(form.venueLng),
@@ -282,32 +292,27 @@ function EventForm({ open, editing, onClose, onSaved }) {
               value={form.specialPoints}
               onChange={set('specialPoints')}
             />
-            {/* อธิบายไว้เพราะเป็นกระเป๋าคนละใบกับคะแนนปกติ ไม่ใช่โบนัสที่บวกรวมกัน */}
-            <p className="mt-1 text-2xs text-muted">
-              ได้เพิ่มจากคะแนนปกติ เก็บแยกกระเป๋าและใช้แลกเฉพาะของรางวัลที่ตั้งเป็นคะแนนพิเศษ
-            </p>
           </div>
 
           {/* ช่องวันหมดอายุโผล่เมื่อกิจกรรมนี้ให้คะแนนพิเศษจริงเท่านั้น
-              กิจกรรมที่ไม่ให้คะแนนพิเศษไม่ต้องมีช่องนี้มารกฟอร์ม */}
+              กิจกรรมที่ไม่ให้คะแนนพิเศษไม่ต้องมีช่องนี้มารกฟอร์ม
+              แต่ถ้าให้คะแนนพิเศษแล้วต้องกรอก ไม่มีทางเลือก "ไม่มีวันหมดอายุ" อีกต่อไป */}
           {Number(form.specialPoints) > 0 && (
             <div className="sm:col-span-2">
               <label className="label" htmlFor="specialPointsExpireAt">
                 <span className="inline-flex items-center gap-1.5">
-                  <SpecialPointIcon size={18} /> คะแนนพิเศษหมดอายุวันที่
+                  <SpecialPointIcon size={18} /> คะแนนพิเศษหมดอายุวันที่ *
                 </span>
               </label>
               <input
                 id="specialPointsExpireAt"
                 type="date"
                 className="field"
+                min={form.eventDate || undefined}
                 value={form.specialPointsExpireAt}
                 onChange={set('specialPointsExpireAt')}
+                required
               />
-              <p className="mt-1 text-2xs text-muted">
-                เว้นว่างไว้ = ไม่มีวันหมดอายุ · พ้นวันนี้แล้วคะแนนพิเศษจะถูกตัดเหลือ 0
-                ทั้งของคนที่ได้จากกิจกรรมนี้และยอดที่สะสมไว้ก่อนหน้า
-              </p>
             </div>
           )}
           <div>

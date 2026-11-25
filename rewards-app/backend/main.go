@@ -51,6 +51,14 @@ func startAnnualResetWatcher() {
 func startSpecialPointsWatcher() {
 	go func() {
 		for {
+			// เตือนก่อนตัด ไม่ใช่หลังตัด
+			// ถ้าตัดก่อนแล้วค่อยเตือน คนที่หมดอายุพอดีวันนี้จะได้ใบแจ้งเตือนทั้งที่คะแนนหายไปแล้ว
+			if count, err := controllers.NotifySpecialPointsExpiring(0); err != nil {
+				log.Printf("แจ้งเตือนคะแนนพิเศษใกล้หมดอายุไม่สำเร็จ: %v", err)
+			} else if count > 0 {
+				log.Printf("คะแนนพิเศษใกล้หมดอายุ: แจ้งเตือน %d บัญชี", count)
+			}
+
 			if count, err := controllers.ExpireSpecialPoints(0); err != nil {
 				log.Printf("ตัดยอดคะแนนพิเศษที่หมดอายุไม่สำเร็จ: %v", err)
 			} else if count > 0 {

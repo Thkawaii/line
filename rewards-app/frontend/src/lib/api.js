@@ -42,13 +42,28 @@ const qs = (params = {}) => {
   return entries.length ? `?${new URLSearchParams(entries)}` : '';
 };
 
-async function request(path, { method = 'GET', body } = {}) {
+/*
+  params ต่อท้าย URL ให้เอง จะได้ไม่ต้องประกอบ query string เองทุกที่
+
+  เคยมีบั๊กจากการเรียก request(path, { params }) ตอนที่ตัวนี้ยังไม่รองรับ
+  ตัวเลือกที่ไม่รู้จักถูกทิ้งเงียบ ๆ ตัวกรองจึงไม่เคยถูกส่งไปถึงเซิร์ฟเวอร์
+  หน้าจอเลยแสดงผลของตัวกรองเริ่มต้นตลอด โดยไม่มีอะไรฟ้องว่าผิด
+
+  ตัวเลือกที่ไม่รู้จักตัวอื่นก็ยังถูกทิ้งเงียบเหมือนเดิม จึงโยนทิ้งไม่ได้
+  ต้องบอกให้รู้ตั้งแต่ตอนพัฒนา ไม่ใช่ปล่อยให้ไปเจอเอาตอนใช้งานจริง
+*/
+async function request(path, { method = 'GET', body, params, ...rest } = {}) {
+  const unknown = Object.keys(rest);
+  if (unknown.length) {
+    throw new Error(`request() ไม่รู้จักตัวเลือก: ${unknown.join(', ')}`);
+  }
+
   const headers = {};
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  const res = await fetch(`${BASE}/api${path}`, {
+  const res = await fetch(`${BASE}/api${path}${qs(params)}`, {
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -71,6 +86,8 @@ export const api = {
   /* เข้าสู่ระบบ */
   login: (payload) => request('/auth/login', { method: 'POST', body: payload }),
   me: () => request('/auth/me'),
+  // เปลี่ยนรหัสผ่านของตัวเอง ต้องกรอกรหัสเดิมมาด้วย
+  changePassword: (body) => request('/auth/change-password', { method: 'POST', body }),
   acceptTerms: () => request('/auth/accept-terms', { method: 'POST' }),
 
   /* ฝั่งพนักงาน */
@@ -114,13 +131,31 @@ export const api = {
   adminDeleteEmployee: (id) => request(`/admin/employees/${id}`, { method: 'DELETE' }),
   adminPoints: (params) => request(`/admin/points${qs(params)}`),
   adminAdjustPoints: (body) => request('/admin/points/adjust', { method: 'POST', body }),
+
+  // คำขอปรับคะแนนที่รออนุมัติ — คะแนนยังไม่ขยับจนกว่าจะครบทั้งฝั่ง GA และ HR
+  adminPointRequests: (params) => request('/admin/points/requests', { params }),
+  adminDecidePointRequest: (id, body) =>
+    request(`/admin/points/requests/${id}/decide`, { method: 'POST', body }),
+  adminCancelPointRequest: (id) =>
+    request(`/admin/points/requests/${id}/cancel`, { method: 'POST' }),
   adminResetStatus: () => request('/admin/points/reset-status'),
   adminAnnualReset: () => request('/admin/points/annual-reset', { method: 'POST' }),
   adminRewards: () => request('/admin/rewards'),
   adminCreateReward: (body) => request('/admin/rewards', { method: 'POST', body }),
   adminUpdateReward: (id, body) => request(`/admin/rewards/${id}`, { method: 'PATCH', body }),
-  adminRedemptions: (status) => request(`/admin/redemptions${qs({ status })}`),
+  // รับทั้งแบบเดิม (ส่งสถานะมาเป็นข้อความ) และแบบใหม่ที่ส่งตัวกรองมาทั้งก้อน
+  adminRedemptions: (params) =>
+    request(`/admin/redemptions${qs(typeof params === 'string' ? { status: params } : params)}`),
   adminReceiveRedemption: (id) => request(`/admin/redemptions/${id}/receive`, { method: 'POST' }),
+  adminRevertRedemption: (id) => request(`/admin/redemptions/${id}/revert`, { method: 'POST' }),
+  adminScan: (body) => request('/admin/scan', { method: 'POST', body }),
+
+  // ป็อปอัปแจ้งว่าคะแนนถูกปรับ เด้งครั้งเดียวต่อหนึ่งรายการ
+  pointAlerts: () => request('/app/point-alerts'),
+  ackPointAlerts: (ids) => request('/app/point-alerts/ack', { method: 'POST', body: { ids } }),
+
+  // QR ของรางวัลที่แลกไว้ มีอายุสั้น หมดแล้วกดขอใหม่ได้
+  myRewardQr: (id) => request(`/app/my-rewards/${id}/qr`),
   adminEvents: () => request('/admin/events'),
   adminCreateEvent: (body) => request('/admin/events', { method: 'POST', body }),
   adminUpdateEvent: (id, body) => request(`/admin/events/${id}`, { method: 'PATCH', body }),

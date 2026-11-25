@@ -131,6 +131,13 @@ export default {
   'profile.menuFaq': 'คำถามที่พบบ่อย',
   'profile.menuTerms': 'ข้อกำหนดและเงื่อนไข',
   'profile.logout': 'ออกจากระบบ',
+  'profile.changePassword': 'เปลี่ยนรหัสผ่าน',
+  'profile.currentPassword': 'รหัสผ่านเดิม',
+  'profile.newPassword': 'รหัสผ่านใหม่',
+  'profile.confirmPassword': 'ยืนยันรหัสผ่านใหม่',
+  'profile.passwordMismatch': 'รหัสผ่านใหม่สองช่องไม่ตรงกัน',
+  'profile.passwordChanged': 'เปลี่ยนรหัสผ่านเรียบร้อยแล้ว',
+  'profile.savePassword': 'บันทึกรหัสผ่านใหม่',
 
   /* คะแนนของฉัน */
   'points.title': 'คะแนนของฉัน',
@@ -172,6 +179,14 @@ export default {
   'myRewards.pickupHint':
     'ติดต่อรับของรางวัลได้ที่ฝ่ายบริหารงานทั่วไปและทรัพยากรบุคคล (GA&ER)',
   'myRewards.refCode': 'รหัสอ้างอิง',
+  'myRewards.showQr': 'QR CODE',
+  'myRewards.qrTitle': 'QR สำหรับรับของรางวัล',
+  'myRewards.qrExpiresIn': 'QR นี้จะหมดอายุในเวลาที่เหลือ แตะเพื่อขอรหัสใหม่',
+  'myRewards.qrHint': 'กรุณานำ QR CODE ไปแสดงให้เจ้าหน้าที่แสกนเพื่อรับของ',
+  'myRewards.qrExpired': 'QR หมดอายุแล้ว แตะเพื่อขอรหัสใหม่',
+  'myRewards.copied': 'คัดลอกรหัสอ้างอิงแล้ว',
+  'myRewards.copy': 'คัดลอกรหัสอ้างอิง',
+  'myRewards.qrImageAlt': 'QR CODE สำหรับรับของรางวัล',
 
   /* การแจ้งเตือน */
   'notifications.title': 'การแจ้งเตือน',
@@ -246,9 +261,22 @@ export default {
   'news.acknowledge': 'รับทราบข้อมูลข่าวสาร',
 
   /* คะแนนพิเศษ */
+  'pointAlert.badge': 'คะแนนอัปเดต',
+  'pointAlert.title': 'คะแนนของคุณถูกปรับ',
+  'pointAlert.added': 'คะแนนของคุณถูกปรับเพิ่ม',
+  'pointAlert.deducted': 'คะแนนของคุณถูกปรับลด',
+  'pointAlert.item': 'รายการ',
+  'pointAlert.reason': 'เหตุผล',
+  'pointAlert.approvedBy': 'อนุมัติโดย',
+  'pointAlert.ok': 'รับทราบ',
+  'pointAlert.next': 'รับทราบ ({{n}}/{{total}})',
+  'pointAlert.seeHistory': 'ดูประวัติคะแนน',
   'points.special': 'คะแนนพิเศษ',
   'points.specialBalance': 'คะแนนพิเศษของคุณ',
   'points.normal': 'คะแนนปกติ',
+  'points.specialExpireAt': 'คะแนนพิเศษหมดอายุ : {{date}}',
+  'points.specialExpiringSoon': 'คะแนนพิเศษหมดอายุ {{date}} · เหลืออีก {{days}} วัน',
+  'points.specialExpiresToday': 'วันนี้วันสุดท้ายของคะแนนพิเศษ ({{date}})',
   'rewards.useSpecial': 'แลกด้วยคะแนนพิเศษ',
 
   /* ตรวจตำแหน่งตอนลงทะเบียน */

@@ -4,6 +4,7 @@ import { useAuth } from './context/AuthContext';
 import { isBackOffice } from './lib/org';
 import { Spinner } from './components/ui';
 import TierLevelUpWatcher from './components/TierLevelUp';
+import PointAdjustAlertWatcher from './components/PointAdjustAlert';
 import AnnouncementGate from './components/AnnouncementGate';
 import FeedbackGate from './components/FeedbackGate';
 
@@ -85,6 +86,7 @@ export default function App() {
     <>
       <ScrollToTop />
       <TierLevelUpWatcher />
+      <PointAdjustAlertWatcher />
       {/* ประกาศที่ต้องกดรับทราบ ขึ้นทับทุกหน้าจนกว่าพนักงานจะอ่านครบและกดรับทราบ */}
       <AnnouncementGate />
 

@@ -121,6 +121,71 @@ func Me(w http.ResponseWriter, r *http.Request) {
 	web.JSON(w, http.StatusOK, web.Map{"user": user})
 }
 
+/*
+ChangePassword ให้เจ้าของบัญชีเปลี่ยนรหัสผ่านของตัวเอง
+
+ต้องกรอกรหัสผ่านเดิมมาด้วยเสมอ แม้จะล็อกอินอยู่แล้วก็ตาม
+เพราะเครื่องที่เปิดทิ้งไว้แล้วลุกไปเข้าห้องน้ำ คือเครื่องที่ใครก็เดินมาเปลี่ยนรหัสได้
+การถามรหัสเดิมทำให้คนที่ยึดหน้าจอไปเฉย ๆ เปลี่ยนรหัสล็อกเจ้าตัวออกไม่ได้
+
+ไม่แตะ token ที่ออกไปแล้ว เครื่องอื่นที่ล็อกอินค้างอยู่จึงยังใช้ได้ต่อจนหมดอายุ
+ถ้าต้องการเตะทุกเครื่องออก ต้องทำระบบเวอร์ชันของ token เพิ่ม ซึ่งเกินขอบเขตตรงนี้
+*/
+func ChangePassword(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.CurrentUser(r)
+
+	var body struct {
+		Current string `json:"currentPassword"`
+		Next    string `json:"newPassword"`
+	}
+	if err := web.Decode(r, &body); err != nil {
+		web.Error(w, http.StatusBadRequest, "ข้อมูลที่ส่งมาไม่ถูกต้อง")
+		return
+	}
+
+	// ไม่กำหนดความยาวขั้นต่ำตามที่ตกลงกันไว้ แต่ยังกันค่าว่าง
+	// รหัสผ่านว่างแปลว่าใครก็เข้าบัญชีนี้ได้โดยไม่ต้องรู้อะไรเลย
+	if strings.TrimSpace(body.Next) == "" {
+		web.Error(w, http.StatusBadRequest, "กรอกรหัสผ่านใหม่")
+		return
+	}
+	if body.Current == body.Next {
+		web.Error(w, http.StatusBadRequest, "รหัสผ่านใหม่ต้องไม่ซ้ำกับรหัสเดิม")
+		return
+	}
+
+	row, err := store.QueryOne(`SELECT password_hash FROM users WHERE id = $1`, claims.ID)
+	if err != nil {
+		web.Fail(w, err)
+		return
+	}
+	if row == nil {
+		web.Error(w, http.StatusNotFound, "ไม่พบบัญชีนี้")
+		return
+	}
+
+	hash, _ := row["password_hash"].(string)
+	if !security.CheckPassword(body.Current, hash) {
+		web.Error(w, http.StatusForbidden, "รหัสผ่านเดิมไม่ถูกต้อง")
+		return
+	}
+
+	next, err := security.HashPassword(body.Next)
+	if err != nil {
+		web.Fail(w, err)
+		return
+	}
+	if _, err := store.Exec(
+		`UPDATE users SET password_hash = $2 WHERE id = $1`, claims.ID, next); err != nil {
+		web.Fail(w, err)
+		return
+	}
+
+	// บันทึกไว้ว่าเปลี่ยนเมื่อไหร่ แต่ไม่เก็บรหัสผ่านลง log ไม่ว่ารูปแบบไหน
+	logAudit(claims.ID, "account.change-password", "ตัวเอง", "")
+	web.JSON(w, http.StatusOK, web.Map{"ok": true})
+}
+
 // AcceptTerms บันทึกเวลาที่กดยอมรับ PDPA เพื่อไม่ต้องแสดงหน้าข้อตกลงซ้ำ
 func AcceptTerms(w http.ResponseWriter, r *http.Request) {
 	claims := middleware.CurrentUser(r)
