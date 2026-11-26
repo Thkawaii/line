@@ -12,7 +12,7 @@ import { Icon } from '../../components/icons';
 import RegistrationSheet from '../../components/RegistrationSheet';
 import ImageCropper from '../../components/ImageCropper';
 import TranslatedFields from '../../components/TranslatedFields';
-import { dateRange, num, timeRange } from '../../lib/format';
+import { dateRange, num, thaiDate, timeRange } from '../../lib/format';
 
 // ช่องข้อความที่กรอกคำแปลได้
 const TEXT_FIELDS = [
@@ -133,7 +133,22 @@ const EMPTY = {
   kind: 'register',
   capacity: '',
   status: 'open',
+  feedbackLead: 60,
+  feedbackLeadUnit: 'minutes',
 };
+
+/*
+แปลงนาทีที่เก็บในฐานข้อมูล กลับเป็นตัวเลข+หน่วยที่อ่านสบายตา
+
+เก็บเป็นนาทีหน่วยเดียวเพื่อให้คำนวณง่าย แต่ 120 นาทีควรโชว์ว่า 2 ชั่วโมง
+ไม่ใช่ให้ผู้ดูแลมานั่งหารเอง ส่วน 90 นาทีโชว์เป็นนาทีเพราะ 1.5 ชั่วโมงกรอกเป็นจำนวนเต็มไม่ได้
+*/
+function splitLead(minutes) {
+  const value = Number(minutes);
+  if (!Number.isFinite(value) || value < 0) return { feedbackLead: 60, feedbackLeadUnit: 'minutes' };
+  if (value > 0 && value % 60 === 0) return { feedbackLead: value / 60, feedbackLeadUnit: 'hours' };
+  return { feedbackLead: value, feedbackLeadUnit: 'minutes' };
+}
 
 function EventForm({ open, editing, onClose, onSaved }) {
   const toast = useToast();
@@ -165,6 +180,7 @@ function EventForm({ open, editing, onClose, onSaved }) {
             capacity: editing.capacity,
             status: editing.status,
             imageUrl: editing.image_url || '',
+            ...splitLead(editing.feedback_lead_minutes ?? 60),
           }
         : EMPTY
     );
@@ -174,6 +190,35 @@ function EventForm({ open, editing, onClose, onSaved }) {
   }, [open, editing]);
 
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
+
+  // เก็บหน่วยเดียวคือนาที หน้าเว็บเป็นฝ่ายแปลงจากหน่วยที่ผู้ดูแลเลือก
+  const leadMinutes =
+    Math.max(0, Math.round(Number(form.feedbackLead || 0))) *
+    (form.feedbackLeadUnit === 'hours' ? 60 : 1);
+
+  /*
+    บอกเวลาที่แบบประเมินจะขึ้นจริง ไม่ใช่ให้ผู้ดูแลคิดในใจเอง
+
+    "ก่อนจบ 90 นาที" ของงานที่เลิก 16:30 คือ 15:00 ซึ่งคิดเองก็ได้
+    แต่พอเป็นงานหลายวัน หรือเวลาเลิกคร่อมเที่ยงคืน คนจะคิดผิดได้ง่าย
+    และความผิดแบบนี้จะไม่มีใครรู้จนกว่าจะถึงวันงานจริง
+  */
+  const leadPreview = (() => {
+    const lastDay = form.endDate || form.eventDate;
+    if (!lastDay || !form.endTime) return null;
+
+    const ends = new Date(`${lastDay}T${form.endTime}`);
+    if (Number.isNaN(ends.getTime())) return null;
+
+    const opens = new Date(ends.getTime() - leadMinutes * 60000);
+    const starts = form.eventDate && form.startTime ? new Date(`${form.eventDate}T${form.startTime}`) : null;
+
+    return {
+      text: `${thaiDate(opens)} ${String(opens.getHours()).padStart(2, '0')}:${String(opens.getMinutes()).padStart(2, '0')} น.`,
+      // ขึ้นก่อนงานเริ่มไม่ใช่เรื่องผิดกฎ แต่เกือบทุกครั้งคือกรอกเกินมาโดยไม่ตั้งใจ
+      beforeStart: starts ? opens < starts : false,
+    };
+  })();
 
   /** เติมพิกัดจากตำแหน่งที่ผู้ดูแลยืนอยู่ สะดวกกว่าไปหาพิกัดจากแผนที่มากรอกเอง */
   async function useMyLocation() {
@@ -216,6 +261,8 @@ function EventForm({ open, editing, onClose, onSaved }) {
       venueLng: form.venueLng === '' ? null : Number(form.venueLng),
       venueRadius: Number(form.venueRadius) || 150,
       capacity: Number(form.capacity || 0),
+      // ส่งเป็นนาทีเสมอ ฝั่งเซิร์ฟเวอร์เก็บหน่วยเดียว หน้าเว็บเป็นฝ่ายแปลงให้
+      feedbackLeadMinutes: leadMinutes,
     };
     try {
       if (editing) await api.adminUpdateEvent(editing.id, payload);
@@ -320,6 +367,44 @@ function EventForm({ open, editing, onClose, onSaved }) {
               จำนวนที่รับ (0 = ไม่จำกัด)
             </label>
             <input id="capacity" type="number" min="0" className="field" value={form.capacity} onChange={set('capacity')} />
+          </div>
+
+          {/* เวลาที่แบบประเมินจะขึ้น ย้ายมาจากหน้าตั้งค่าระบบ
+              เพราะงานสั้นกับงานทั้งวันใช้ค่าเดียวกันไม่ได้ */}
+          <div className="sm:col-span-2">
+            <label className="label" htmlFor="feedbackLead">
+              แบบประเมินความพึงพอใจขึ้นก่อนจบกิจกรรม
+            </label>
+            <div className="flex gap-2">
+              <input
+                id="feedbackLead"
+                type="number"
+                min="0"
+                className="field w-28"
+                value={form.feedbackLead}
+                onChange={set('feedbackLead')}
+              />
+              <div className="w-32">
+                <Select
+                  options={[
+                    { value: 'minutes', label: 'นาที' },
+                    { value: 'hours', label: 'ชั่วโมง' },
+                  ]}
+                  value={form.feedbackLeadUnit}
+                  onChange={(value) => setForm((f) => ({ ...f, feedbackLeadUnit: value }))}
+                />
+              </div>
+              {leadPreview && (
+                <p className="self-center text-2xs text-muted">
+                  จะขึ้นให้ประเมิน <b className="text-ink">{leadPreview.text}</b>
+                </p>
+              )}
+            </div>
+            {leadPreview?.beforeStart && (
+              <p className="mt-1.5 text-2xs text-gold-ink">
+                เวลานี้อยู่ก่อนกิจกรรมเริ่ม พนักงานจะประเมินได้ตั้งแต่ยังไม่ได้เข้าร่วม
+              </p>
+            )}
           </div>
           {/* พื้นที่จัดงาน — เว้นว่างไว้คือไม่ตรวจตำแหน่ง */}
           <fieldset className="rounded-[10px] border border-line p-4 sm:col-span-2">

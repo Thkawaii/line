@@ -11,9 +11,13 @@ import (
 /*
 แบบประเมินความพึงพอใจหลังกิจกรรม
 
-ขึ้นให้ตอบก่อนกิจกรรมจบตามจำนวนชั่วโมงที่ตั้งไว้ในหน้าตั้งค่าระบบ
+ขึ้นให้ตอบก่อนกิจกรรมจบตามจำนวนนาทีที่ตั้งไว้ "ของกิจกรรมนั้น"
 เหตุผลที่ขึ้นก่อนจบ ไม่ใช่หลังจบ เพราะคนยังอยู่ในงานและยังจำบรรยากาศได้
 ถ้ารอจนกลับบ้านแล้วค่อยส่ง อัตราการตอบจะตกลงมาก
+
+เวลานี้เคยเป็นค่ากลางของทั้งระบบและกรอกได้แค่จำนวนชั่วโมง
+ซึ่งใช้กับงานสั้นไม่ได้ งานที่สั้นกว่าหนึ่งชั่วโมงจะถูกเปิดให้ประเมิน
+ตั้งแต่ก่อนงานเริ่ม ตอนนี้ย้ายไปตั้งที่ตัวกิจกรรมและเก็บเป็นนาที
 
 ตอบได้เฉพาะคนที่ลงทะเบียนกิจกรรมนั้นจริง และตอบได้ครั้งเดียว
 */
@@ -22,9 +26,13 @@ import (
 //
 // เวลาจบกิจกรรมคิดจากวันสุดท้ายของงานบวกเวลาเลิก
 // กิจกรรมหลายวันจึงใช้วันสุดท้าย ไม่ใช่วันแรก
+//
+// เวลาเริ่มเปิดอ่านจากคอลัมน์ของกิจกรรมเอง ไม่ใช่พารามิเตอร์
+// ส่วนจำนวนวันที่ยังเปิดต่อหลังจบงานยังเป็นค่ากลางของระบบอยู่ ($2)
 const feedbackWindow = `
-	(COALESCE(e.end_date, e.event_date) + e.end_time) - make_interval(hours => $2) <= now()
-	AND now() < (COALESCE(e.end_date, e.event_date) + e.end_time) + make_interval(days => $3)`
+	(COALESCE(e.end_date, e.event_date) + e.end_time)
+	  - make_interval(mins => e.feedback_lead_minutes) <= now()
+	AND now() < (COALESCE(e.end_date, e.event_date) + e.end_time) + make_interval(days => $2)`
 
 /* ---------- ฝั่งพนักงาน ---------- */
 
@@ -32,7 +40,6 @@ const feedbackWindow = `
 func PendingFeedback(w http.ResponseWriter, r *http.Request) {
 	claims := middleware.CurrentUser(r)
 
-	lead := settingInt("event.feedbackLeadHours", 1, 0, 720)
 	open := settingInt("event.feedbackOpenDays", 7, 1, 365)
 
 	rows, err := store.Query(`
@@ -43,7 +50,7 @@ func PendingFeedback(w http.ResponseWriter, r *http.Request) {
 		LEFT JOIN event_feedback f ON f.event_id = e.id AND f.user_id = $1
 		WHERE f.id IS NULL AND`+feedbackWindow+`
 		ORDER BY COALESCE(e.end_date, e.event_date), e.end_time`,
-		claims.ID, lead, open)
+		claims.ID, open)
 	if err != nil {
 		web.Fail(w, err)
 		return
@@ -84,14 +91,13 @@ func SubmitFeedback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ต้องเป็นคนที่ลงทะเบียนกิจกรรมนี้ และยังอยู่ในช่วงที่เปิดให้ตอบ
-	lead := settingInt("event.feedbackLeadHours", 1, 0, 720)
 	open := settingInt("event.feedbackOpenDays", 7, 1, 365)
 
 	allowed, err := store.QueryOne(`
 		SELECT e.id FROM events e
-		JOIN event_registrations r ON r.event_id = e.id AND r.user_id = $4
+		JOIN event_registrations r ON r.event_id = e.id AND r.user_id = $3
 		WHERE e.id = $1 AND`+feedbackWindow,
-		eventID, lead, open, claims.ID)
+		eventID, open, claims.ID)
 	if err != nil {
 		web.Fail(w, err)
 		return

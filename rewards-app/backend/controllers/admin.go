@@ -935,6 +935,8 @@ type eventBody struct {
 	Kind                  *string         `json:"kind"`
 	Capacity              *int            `json:"capacity"`
 	Status                *string         `json:"status"`
+	// แบบประเมินขึ้นก่อนกิจกรรมจบกี่นาที ตั้งแยกรายกิจกรรม เพราะงานสั้นกับงานทั้งวันใช้ค่าเดียวกันไม่ได้
+	FeedbackLeadMinutes *int `json:"feedbackLeadMinutes"`
 	// พื้นที่จัดงาน เว้นพิกัดว่างไว้ = ไม่ตรวจตำแหน่งตอนลงทะเบียน
 	VenueLat    *float64 `json:"venueLat"`
 	VenueLng    *float64 `json:"venueLng"`
@@ -961,23 +963,28 @@ func AdminCreateEvent(w http.ResponseWriter, r *http.Request) {
 		web.Error(w, http.StatusBadRequest, msg)
 		return
 	}
+	if msg := checkFeedbackLead(body.FeedbackLeadMinutes); msg != "" {
+		web.Error(w, http.StatusBadRequest, msg)
+		return
+	}
 
 	event, err := store.QueryOne(`
 		INSERT INTO events (title, description, agenda, location, image_url, event_date, end_date,
 		                    start_time, end_time, points, kind, capacity, status, translations,
 		                    special_points, special_points_expire_at,
-		                    venue_lat, venue_lng, venue_radius)
+		                    venue_lat, venue_lng, venue_radius, feedback_lead_minutes)
 		VALUES ($1, COALESCE($2,''), COALESCE($3,''), COALESCE($4,''), $5, $6::date, $7::date,
 		        COALESCE($8::time,'09:00'), COALESCE($9::time,'12:00'), COALESCE($10::int,0),
 		        COALESCE($11::varchar,'register'), COALESCE($12::int,0), COALESCE($13::varchar,'open'),
 		        COALESCE($14::jsonb,'{}'::jsonb), COALESCE($15::int,0), $16::date,
-		        $17::double precision, $18::double precision, COALESCE($19::int,150))
+		        $17::double precision, $18::double precision, COALESCE($19::int,150),
+		        COALESCE($20::int,60))
 		RETURNING *`,
 		body.Title, body.Description, body.Agenda, body.Location, emptyToNull(body.ImageURL),
 		body.EventDate, nullDate(body.EndDate), nullTime(body.StartTime), nullTime(body.EndTime),
 		body.Points, body.Kind, body.Capacity, body.Status, jsonOrNil(body.Translations),
 		body.SpecialPoints, nullDate(body.SpecialPointsExpireAt),
-		body.VenueLat, body.VenueLng, body.VenueRadius)
+		body.VenueLat, body.VenueLng, body.VenueRadius, body.FeedbackLeadMinutes)
 	if err != nil {
 		web.Fail(w, err)
 		return
@@ -1016,6 +1023,10 @@ func AdminUpdateEvent(w http.ResponseWriter, r *http.Request) {
 		web.Error(w, http.StatusBadRequest, msg)
 		return
 	}
+	if msg := checkFeedbackLead(body.FeedbackLeadMinutes); msg != "" {
+		web.Error(w, http.StatusBadRequest, msg)
+		return
+	}
 
 	event, err := store.QueryOne(`
 		UPDATE events SET
@@ -1032,6 +1043,7 @@ func AdminUpdateEvent(w http.ResponseWriter, r *http.Request) {
 		  venue_lat = CASE WHEN $21::boolean THEN $22::double precision ELSE venue_lat END,
 		  venue_lng = CASE WHEN $21::boolean THEN $23::double precision ELSE venue_lng END,
 		  venue_radius = COALESCE($24::int, venue_radius),
+		  feedback_lead_minutes = COALESCE($25::int, feedback_lead_minutes),
 		  translations = COALESCE($13::jsonb, translations),
 		  -- ส่งค่าว่างมาคือตั้งใจล้างวันสิ้นสุด จึงใช้ค่าที่ส่งมาตรง ๆ
 		  end_date = CASE WHEN $14::boolean THEN $15::date ELSE end_date END,
@@ -1046,7 +1058,7 @@ func AdminUpdateEvent(w http.ResponseWriter, r *http.Request) {
 		body.SpecialPoints,
 		body.SpecialPointsExpireAt != nil, nullDate(body.SpecialPointsExpireAt),
 		body.VenueLat != nil || body.VenueLng != nil, body.VenueLat, body.VenueLng,
-		body.VenueRadius)
+		body.VenueRadius, body.FeedbackLeadMinutes)
 	if err != nil {
 		web.Fail(w, err)
 		return
@@ -1328,6 +1340,28 @@ func checkSpecialExpiry(points *int, expireAt *string) string {
 	}
 	if blank(expireAt) {
 		return "กิจกรรมที่ให้คะแนนพิเศษต้องระบุวันหมดอายุของคะแนนพิเศษ"
+	}
+	return ""
+}
+
+/*
+checkFeedbackLead ตรวจเวลาที่แบบประเมินจะขึ้นก่อนกิจกรรมจบ
+
+0 แปลว่าขึ้นตอนงานจบพอดี ซึ่งใช้ได้จริงจึงยอมให้ตั้ง
+เพดาน 43,200 นาที (30 วัน) เท่ากับเพดานเดิมสมัยที่ยังเป็นค่ากลางหน่วยชั่วโมง (720 ชั่วโมง)
+
+ค่าติดลบต้องกันไว้ เพราะ make_interval รับค่าติดลบได้โดยไม่ error
+ผลคือแบบประเมินจะไปเปิด "หลัง" งานจบ ซึ่งไม่มีใครตั้งใจและไม่มีอะไรฟ้อง
+*/
+func checkFeedbackLead(minutes *int) string {
+	if minutes == nil {
+		return ""
+	}
+	if *minutes < 0 {
+		return "เวลาที่แบบประเมินขึ้นก่อนจบกิจกรรมต้องไม่ติดลบ"
+	}
+	if *minutes > 43200 {
+		return "เวลาที่แบบประเมินขึ้นก่อนจบกิจกรรมต้องไม่เกิน 30 วัน"
 	}
 	return ""
 }
