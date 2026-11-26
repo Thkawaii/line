@@ -41,6 +41,26 @@ const pad = (n) => String(n).padStart(2, '0');
 // ปีพุทธศักราช ใช้เฉพาะภาษาไทย
 export const buddhistYear = (date) => toDate(date).getFullYear() + 543;
 
+/*
+ชื่อเดือนและชื่อวันสำหรับปฏิทินที่วาดเอง
+
+อยู่ที่นี่เพราะตารางชื่อเดือนอยู่ที่นี่อยู่แล้ว ถ้าไปตั้งตารางใหม่ในปฏิทิน
+วันหนึ่งจะมีสองตารางที่ไม่ตรงกัน
+*/
+const WEEKDAYS = {
+  th: ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'],
+  en: ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'],
+  ja: ['日', '月', '火', '水', '木', '金', '土'],
+};
+
+export const monthNames = ({ full = false } = {}) =>
+  (MONTHS[language] || MONTHS.th)[full ? 'full' : 'short'];
+
+export const weekdayNames = () => WEEKDAYS[language] || WEEKDAYS.th;
+
+// ปีที่แสดงบนหน้าจอ ไทยเป็น พ.ศ. ภาษาอื่นเป็น ค.ศ.
+export const displayYear = (year) => (language === 'th' ? year + 543 : year);
+
 export function thaiDate(value, { full = false, shortYear = false } = {}) {
   if (!value) return '-';
   const d = toDate(value);

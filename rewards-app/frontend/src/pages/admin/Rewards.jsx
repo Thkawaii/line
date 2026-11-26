@@ -18,6 +18,7 @@ import ImageCropper from '../../components/ImageCropper';
 import TranslatedFields from '../../components/TranslatedFields';
 import { Icon } from '../../components/icons';
 import { dateTime, num, thaiDate } from '../../lib/format';
+import DateField from '../../components/DateField';
 
 // ช่องที่แปลได้ ใช้ทั้งในฟอร์มและตอนส่งขึ้น API
 const TEXT_FIELDS = [
@@ -203,13 +204,13 @@ function RewardForm({ open, editing, onClose, onSaved }) {
                 <label className="mb-1 block text-2xs text-muted" htmlFor="startsAt">
                   เริ่ม
                 </label>
-                <input id="startsAt" type="date" className="field" value={form.startsAt} onChange={set('startsAt')} />
+                <DateField id="startsAt" className="field" value={form.startsAt} onChange={set('startsAt')} />
               </div>
               <div>
                 <label className="mb-1 block text-2xs text-muted" htmlFor="endsAt">
                   สิ้นสุด
                 </label>
-                <input id="endsAt" type="date" className="field" value={form.endsAt} onChange={set('endsAt')} />
+                <DateField id="endsAt" className="field" value={form.endsAt} onChange={set('endsAt')} />
               </div>
             </div>
             <p className="mt-1.5 text-2xs text-muted">

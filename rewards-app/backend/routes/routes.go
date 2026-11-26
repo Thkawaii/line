@@ -72,6 +72,12 @@ func Setup() *http.ServeMux {
 	user("GET /api/app/tiers", controllers.Tiers)
 	user("GET /api/app/feedback/pending", controllers.PendingFeedback)
 	user("POST /api/app/events/{id}/feedback", controllers.SubmitFeedback)
+	// ประชาสัมพันธ์: อ่านข่าว/ดูวิดีโอแล้วได้คะแนน เข้าจากเมนูเอง ไม่ใช่ป็อปอัปบังคับอ่าน
+	user("GET /api/app/pr", controllers.PrFeed)
+	user("GET /api/app/pr/{id}", controllers.PrItem)
+	user("POST /api/app/pr/{id}/progress", controllers.PrProgress)
+	user("POST /api/app/pr/{id}/claim", controllers.PrClaim)
+
 	user("GET /api/app/announcements", controllers.Announcements)
 	user("POST /api/app/announcements/{id}/acknowledge", controllers.AcknowledgeAnnouncement)
 	user("GET /api/app/surveys", controllers.Surveys)
@@ -137,6 +143,7 @@ func Setup() *http.ServeMux {
 
 	office("POST /api/admin/uploads", controllers.Upload)
 	office("POST /api/admin/uploads/document", controllers.UploadDocument)
+	office("POST /api/admin/uploads/video", controllers.UploadVideo)
 
 	office("GET /api/admin/banners", controllers.AdminBanners)
 	office("POST /api/admin/banners", controllers.AdminCreateBanner)
@@ -219,6 +226,12 @@ func Setup() *http.ServeMux {
 	office("GET /api/admin/points/requests", controllers.AdminPointRequests)
 	office("POST /api/admin/points/requests/{id}/decide", controllers.AdminDecidePointRequest)
 	office("POST /api/admin/points/requests/{id}/cancel", controllers.AdminCancelPointRequest)
+
+	office("GET /api/admin/pr", controllers.AdminPrList)
+	office("POST /api/admin/pr", controllers.AdminCreatePr)
+	office("PATCH /api/admin/pr/{id}", controllers.AdminUpdatePr)
+	office("DELETE /api/admin/pr/{id}", controllers.AdminDeletePr)
+	office("GET /api/admin/pr/history", controllers.AdminPrHistory)
 
 	office("GET /api/admin/announcements", controllers.AdminAnnouncements)
 	office("GET /api/admin/announcements/{id}/readers", controllers.AdminAnnouncementReaders)

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { Icon } from '../../components/icons';
 import { Notice } from '../../components/ui';
@@ -9,6 +9,20 @@ import LanguagePicker from '../../components/LanguagePicker';
 export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  /*
+    หน้าที่ผู้ใช้ตั้งใจจะไป ก่อนถูกส่งมาเข้าสู่ระบบ
+
+    ใน LINE มีปุ่มประชาสัมพันธ์กับปุ่มสะสมคะแนนแยกกัน ทั้งสองปุ่มพามาที่หน้านี้
+    ถ้าเข้าระบบแล้วส่งไปหน้าแรกเหมือนกันหมด คนที่กดปุ่มประชาสัมพันธ์
+    จะต้องมาหาเมนูเองอีกทีว่าข่าวที่จะอ่านอยู่ตรงไหน
+
+    รับเฉพาะเส้นทางภายในที่ขึ้นต้นด้วย / เดี่ยว ๆ
+    กันไม่ให้ลิงก์ที่ส่งต่อกันมาพาผู้ใช้ออกไปเว็บอื่นหลังเข้าสู่ระบบ
+  */
+  const requested = location.state?.from;
+  const backTo = typeof requested === 'string' && /^\/(?!\/)/.test(requested) ? requested : '';
   const t = useT();
 
   const [role, setRole] = useState('user');
@@ -26,8 +40,9 @@ export default function Login() {
       const user = await login({ identifier, password, role });
       // พนักงานแผนกหลังบ้านมี role เป็น user แต่เข้าหลังบ้านได้
       // จึงดูจากช่องที่เขาเลือก ไม่ใช่จาก role อย่างเดียว
-      if (role === 'admin' || user.role === 'admin') navigate('/admin', { replace: true });
-      else navigate(user.terms_accepted_at ? '/' : '/terms', { replace: true });
+      if (role === 'admin' || user.role === 'admin') navigate(backTo || '/admin', { replace: true });
+      else if (!user.terms_accepted_at) navigate('/terms', { replace: true, state: { from: backTo } });
+      else navigate(backTo || '/', { replace: true });
     } catch (err) {
       setError(err.message);
       setBusy(false);

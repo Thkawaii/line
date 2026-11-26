@@ -17,6 +17,7 @@ const NAV = [
     icon: Icon.Megaphone,
     staff: true,
     children: [
+      { to: '/admin/pr', label: 'จัดการประชาสัมพันธ์', staff: true },
       { to: '/admin/news', label: 'ประกาศข่าวสาร', staff: true },
       { to: '/admin/notifications', label: 'Notifications' },
       { to: '/admin/content/banner', label: 'Banner' },

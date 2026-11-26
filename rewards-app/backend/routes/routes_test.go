@@ -59,6 +59,18 @@ func TestRoutesTheFrontendCalls(t *testing.T) {
 		{"POST", "/api/admin/points/requests/7/decide"},
 		{"POST", "/api/admin/points/requests/7/cancel"},
 
+		// ประชาสัมพันธ์: อ่านข่าว/ดูวิดีโอแล้วได้คะแนน
+		{"GET", "/api/app/pr"},
+		{"GET", "/api/app/pr/7"},
+		{"POST", "/api/app/pr/7/progress"},
+		{"POST", "/api/app/pr/7/claim"},
+		{"GET", "/api/admin/pr"},
+		{"POST", "/api/admin/pr"},
+		{"PATCH", "/api/admin/pr/7"},
+		{"DELETE", "/api/admin/pr/7"},
+		{"GET", "/api/admin/pr/history"},
+		{"POST", "/api/admin/uploads/video"},
+
 		// หน้าวิเคราะห์ที่มีตัวกรองกิจกรรม
 		{"GET", "/api/admin/analytics"},
 		{"GET", "/api/admin/points/reset-status"},

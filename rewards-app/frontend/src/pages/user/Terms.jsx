@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useAuth } from '../../context/AuthContext';
 import { Spinner } from '../../components/ui';
@@ -10,6 +10,7 @@ import { useLanguage } from '../../lib/i18n';
 export default function Terms() {
   const { acceptTerms } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const { t, lang } = useLanguage();
   const [policy, setPolicy] = useState(null);
   const [agreed, setAgreed] = useState(false);
@@ -22,7 +23,10 @@ export default function Terms() {
   async function accept() {
     setBusy(true);
     await acceptTerms();
-    navigate('/', { replace: true });
+    // คนที่กดปุ่มประชาสัมพันธ์ใน LINE แล้วเพิ่งยอมรับ PDPA ครั้งแรก
+    // ควรได้ไปต่อที่ข่าวที่เขาตั้งใจจะอ่าน ไม่ใช่หน้าแรก
+    const from = location.state?.from;
+    navigate(typeof from === 'string' && /^\/(?!\/)/.test(from) ? from : '/', { replace: true });
   }
 
   return (

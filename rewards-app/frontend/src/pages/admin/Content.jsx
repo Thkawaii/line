@@ -200,7 +200,6 @@ function BannerPage() {
       <ConfirmDialog
         open={!!removing}
         title={`ลบแบนเนอร์ "${removing?.title ?? ''}" ใช่ไหม`}
-        message="แบนเนอร์จะหายไปจากหน้าแรกของพนักงานทันที การลบย้อนกลับไม่ได้"
         confirmLabel="ลบแบนเนอร์"
         onConfirm={remove}
         onCancel={() => setRemoving(null)}
