@@ -18,6 +18,7 @@ import {
 } from '../../components/ui';
 import { Icon } from '../../components/icons';
 import { STATUS_STYLE, TIER_STYLE, dateTime, num, signedPoints, thaiDate } from '../../lib/format';
+import DateField from '../../components/DateField';
 
 /* ---------- นำเข้าพนักงานจากไฟล์ Excel ---------- */
 
@@ -478,7 +479,7 @@ function EmployeeForm({ open, onClose, editing, onSaved }) {
             <label className="label" htmlFor="birthDate">
               วันเกิด
             </label>
-            <input id="birthDate" type="date" className="field" value={form.birthDate} onChange={set('birthDate')} />
+            <DateField id="birthDate" className="field" value={form.birthDate} onChange={set('birthDate')} />
           </div>
         </div>
 

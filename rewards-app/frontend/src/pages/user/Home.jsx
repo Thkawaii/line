@@ -168,6 +168,22 @@ export default function Home() {
           )}
         </section>
 
+        {/* ประชาสัมพันธ์
+            ปุ่มใน LINE พาเข้ามาที่ /pr ตรง ๆ อยู่แล้ว การ์ดนี้มีไว้ให้คนที่อยู่ในแอป
+            หาเจอโดยไม่ต้องย้อนออกไปกดจาก LINE ใหม่ */}
+        <Link to="/pr" className="card flex items-center gap-3 p-3.5">
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-primary-wash text-primary">
+            <Icon.Megaphone size={22} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block font-bold text-ink">ประชาสัมพันธ์</span>
+            <span className="block text-2xs text-muted">อ่านข่าวสารและรับชมวิดีโอ พร้อมรับคะแนนสะสม</span>
+          </span>
+          <span className="shrink-0 text-muted">
+            <Icon.Next size={18} />
+          </span>
+        </Link>
+
         {/* ของรางวัล */}
         <section>
           <div className="mb-3 flex items-center justify-between">

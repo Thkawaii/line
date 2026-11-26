@@ -13,6 +13,7 @@ import RegistrationSheet from '../../components/RegistrationSheet';
 import ImageCropper from '../../components/ImageCropper';
 import TranslatedFields from '../../components/TranslatedFields';
 import { dateRange, num, thaiDate, timeRange } from '../../lib/format';
+import DateField from '../../components/DateField';
 
 // ช่องข้อความที่กรอกคำแปลได้
 const TEXT_FIELDS = [
@@ -298,13 +299,13 @@ function EventForm({ open, editing, onClose, onSaved }) {
             <label className="label" htmlFor="eventDate">
               วันที่เริ่มจัด *
             </label>
-            <input id="eventDate" type="date" className="field" value={form.eventDate} onChange={set('eventDate')} required />
+            <DateField id="eventDate" className="field" value={form.eventDate} onChange={set('eventDate')} required />
           </div>
           <div>
             <label className="label" htmlFor="endDate">
               วันที่สิ้นสุด
             </label>
-            <input id="endDate" type="date" className="field" value={form.endDate} min={form.eventDate} onChange={set('endDate')} />
+            <DateField id="endDate" className="field" value={form.endDate} min={form.eventDate} onChange={set('endDate')} />
             <p className="mt-1 text-2xs text-muted">เว้นว่างถ้าจัดวันเดียว</p>
           </div>
           <div>
@@ -351,10 +352,9 @@ function EventForm({ open, editing, onClose, onSaved }) {
                   <SpecialPointIcon size={18} /> คะแนนพิเศษหมดอายุวันที่ *
                 </span>
               </label>
-              <input
+              <DateField
                 id="specialPointsExpireAt"
-                type="date"
-                className="field"
+                                className="field"
                 min={form.eventDate || undefined}
                 value={form.specialPointsExpireAt}
                 onChange={set('specialPointsExpireAt')}

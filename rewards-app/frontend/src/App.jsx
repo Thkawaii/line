@@ -28,6 +28,8 @@ import AdminSettings from './pages/admin/Settings';
 import Membership from './pages/user/Membership';
 import AdminNews from './pages/admin/News';
 import AdminFeedback from './pages/admin/Feedback';
+import { PrListPage, PrDetailPage } from './pages/user/Pr';
+import AdminPr from './pages/admin/Pr';
 
 function ScrollToTop() {
   const { pathname } = useLocation();
@@ -125,6 +127,11 @@ export default function App() {
         <Route path="/policy/:key" element={<RequireAuth><PolicyPage /></RequireAuth>} />
         <Route path="/membership" element={<RequireAuth><Membership /></RequireAuth>} />
 
+        {/* ประชาสัมพันธ์ เป็นปลายทางของปุ่มใน LINE โดยตรง
+            ยังไม่ได้เข้าสู่ระบบจะถูกพาไปหน้าล็อกอินแล้วเด้งกลับมาที่นี่ */}
+        <Route path="/pr" element={<RequireAuth><PrListPage /></RequireAuth>} />
+        <Route path="/pr/:id" element={<RequireAuth><PrDetailPage /></RequireAuth>} />
+
         {/* ฝั่งแอดมิน */}
         <Route path="/admin" element={<RequireAuth staff><Dashboard /></RequireAuth>} />
         <Route path="/admin/employees" element={<RequireAuth staff><Employees /></RequireAuth>} />
@@ -137,6 +144,7 @@ export default function App() {
         <Route path="/admin/settings/:key" element={<RequireAuth staff><AdminSettings /></RequireAuth>} />
         <Route path="/admin/news" element={<RequireAuth staff><AdminNews /></RequireAuth>} />
         <Route path="/admin/feedback" element={<RequireAuth staff><AdminFeedback /></RequireAuth>} />
+        <Route path="/admin/pr" element={<RequireAuth staff><AdminPr /></RequireAuth>} />
 
 
         <Route path="*" element={<Navigate to="/" replace />} />

@@ -38,7 +38,10 @@
 	# index.html ห้าม cache ไม่งั้นผู้ใช้ค้างอยู่กับเวอร์ชันเก่าหลัง deploy
 	header /index.html Cache-Control "no-cache"
 
+	# 1100MB เพราะวิดีโอประชาสัมพันธ์อัปได้สูงสุด 1 GB เผื่อส่วนหัวของ multipart อีกเล็กน้อย
+	# ถ้าตั้งต่ำกว่าฝั่ง backend Caddy จะตัดคำขอทิ้งเองตั้งแต่ยังไม่ถึงโปรแกรม
+	# ผู้ใช้จะเห็นหน้า error ของ Caddy แทนข้อความบอกเหตุผลของระบบ
 	request_body {
-		max_size 20MB
+		max_size 1100MB
 	}
 }

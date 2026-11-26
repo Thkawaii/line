@@ -16,6 +16,7 @@ import { Icon } from '../../components/icons';
 import { dateTime, num } from '../../lib/format';
 import { useAuth } from '../../context/AuthContext';
 import { isBackOffice } from '../../lib/org';
+import DateField from '../../components/DateField';
 
 /**
  * ประกาศข่าวสารที่พนักงานต้องกดรับทราบ
@@ -196,10 +197,9 @@ function NewsForm({ open, editing, onClose, onSaved }) {
             <label className="label" htmlFor="news-start">
               เริ่มแสดงวันที่
             </label>
-            <input
+            <DateField
               id="news-start"
-              type="date"
-              className="field"
+                            className="field"
               value={form.startsAt}
               onChange={set('startsAt')}
             />
@@ -209,10 +209,9 @@ function NewsForm({ open, editing, onClose, onSaved }) {
             <label className="label" htmlFor="news-end">
               แสดงถึงวันที่
             </label>
-            <input
+            <DateField
               id="news-end"
-              type="date"
-              className="field"
+                            className="field"
               value={form.endsAt}
               onChange={set('endsAt')}
             />
@@ -440,7 +439,6 @@ export default function AdminNews() {
       <ConfirmDialog
         open={!!removing}
         title="ลบประกาศนี้"
-        message={`ลบ "${removing?.title}" ใช่ไหม ประวัติการกดรับทราบจะหายไปด้วย`}
         confirmLabel="ลบ"
         onConfirm={remove}
         onCancel={() => setRemoving(null)}

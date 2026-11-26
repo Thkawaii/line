@@ -26,6 +26,14 @@ const visibleAnnouncements = `
 	AND (a.starts_at IS NULL OR a.starts_at <= CURRENT_DATE)
 	AND (a.ends_at   IS NULL OR a.ends_at   >= CURRENT_DATE)`
 
+/*
+gateOnly จำกัดให้เหลือเฉพาะประกาศบังคับอ่านของเดิม
+
+ตารางนี้ถูกใช้ร่วมกับงานประชาสัมพันธ์ (channel = 'pr') ซึ่งพนักงานเปิดอ่านเองจากเมนู
+ถ้าไม่กรองออก ข่าวประชาสัมพันธ์ทุกชิ้นจะไปโผล่เป็นป็อปอัปบังคับอ่านทับทุกหน้า
+*/
+const gateOnly = ` AND a.channel = 'gate'`
+
 /* ---------- ฝั่งพนักงาน ---------- */
 
 // Announcements ส่งประกาศที่พนักงานคนนี้ยังไม่ได้กดรับทราบ
@@ -40,7 +48,7 @@ func Announcements(w http.ResponseWriter, r *http.Request) {
 		       a.created_at, a.translations
 		FROM announcements a
 		LEFT JOIN announcement_acks k ON k.announcement_id = a.id AND k.user_id = $1
-		WHERE `+visibleAnnouncements+` AND k.user_id IS NULL
+		WHERE `+visibleAnnouncements+gateOnly+` AND k.user_id IS NULL
 		ORDER BY a.created_at`, claims.ID)
 	if err != nil {
 		web.Fail(w, err)
@@ -84,6 +92,8 @@ func AdminAnnouncements(w http.ResponseWriter, r *http.Request) {
 		       (SELECT count(*)::int FROM users u
 		          WHERE u.role = 'user' AND u.status = 'Active') AS audience
 		FROM announcements a
+		-- หน้านี้คือ "ประกาศข่าวสาร" ที่บังคับอ่าน ส่วนประชาสัมพันธ์มีหน้าจัดการของตัวเอง
+		WHERE a.channel = 'gate'
 		ORDER BY a.created_at DESC`)
 	if err != nil {
 		web.Fail(w, err)

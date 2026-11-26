@@ -13,6 +13,7 @@ import {
 import { Icon } from '../../components/icons';
 import { num, thaiDate } from '../../lib/format';
 import { useAuth } from '../../context/AuthContext';
+import DateField from '../../components/DateField';
 
 /**
  * รายงานสรุปการลงทะเบียน / แบบสำรวจ
@@ -198,10 +199,9 @@ function TopicForm({ open, editing, onClose, onSaved }) {
             <label className="label" htmlFor="topic-start">
               เริ่มวันที่
             </label>
-            <input
+            <DateField
               id="topic-start"
-              type="date"
-              className="field"
+                            className="field"
               value={form.startsAt}
               onChange={set('startsAt')}
             />
@@ -211,10 +211,9 @@ function TopicForm({ open, editing, onClose, onSaved }) {
             <label className="label" htmlFor="topic-end">
               ถึงวันที่
             </label>
-            <input
+            <DateField
               id="topic-end"
-              type="date"
-              className="field"
+                            className="field"
               value={form.endsAt}
               onChange={set('endsAt')}
             />

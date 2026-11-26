@@ -231,4 +231,53 @@ export const api = {
   adminRemindSurvey: (id, message) =>
     request(`/admin/surveys/${id}/remind`, { method: 'POST', body: { message } }),
   adminCreateNotification: (body) => request('/admin/notifications', { method: 'POST', body }),
+
+  /* ประชาสัมพันธ์ — อ่านข่าว/ดูวิดีโอแล้วได้คะแนน */
+  pr: () => request(`/app/pr${qs({ lang: currentLang() })}`),
+  prItem: (id) => request(`/app/pr/${id}${qs({ lang: currentLang() })}`),
+  prProgress: (id, body) => request(`/app/pr/${id}/progress`, { method: 'POST', body }),
+  prClaim: (id) => request(`/app/pr/${id}/claim`, { method: 'POST' }),
+
+  adminPr: () => request('/admin/pr'),
+  adminCreatePr: (body) => request('/admin/pr', { method: 'POST', body }),
+  adminUpdatePr: (id, body) => request(`/admin/pr/${id}`, { method: 'PATCH', body }),
+  adminDeletePr: (id) => request(`/admin/pr/${id}`, { method: 'DELETE' }),
+  adminPrHistory: (params) => request('/admin/pr/history', { params }),
+
+  /*
+    อัปโหลดวิดีโอส่งเป็น multipart ไม่ใช่ JSON แบบที่อื่น
+
+    รูปกับ PDF ส่งเป็น data URL ได้เพราะไฟล์เล็ก แต่ base64 ทำให้ข้อมูลใหญ่ขึ้น
+    ราวหนึ่งในสาม และต้องแปลงทั้งไฟล์เป็นสตริงก่อนส่ง คลิปหลายสิบเมกะไบต์
+    จะกินหน่วยความจำของเบราว์เซอร์จนแท็บค้างก่อนจะได้ส่งด้วยซ้ำ
+
+    onProgress ใช้ XMLHttpRequest เพราะ fetch ยังบอกความคืบหน้าตอนอัปโหลดไม่ได้
+    และการอัปคลิปใหญ่โดยไม่มีอะไรขยับเลยคือสิ่งที่ทำให้คนกดซ้ำหรือปิดหน้าไปเลย
+  */
+  adminUploadVideo: (file, onProgress) =>
+    new Promise((resolve, reject) => {
+      const form = new FormData();
+      form.append('file', file);
+
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${BASE}/api/admin/uploads/video`);
+      const token = getToken();
+      if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+
+      xhr.upload.onprogress = (e) => {
+        if (onProgress && e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+      };
+      xhr.onload = () => {
+        let data = {};
+        try {
+          data = JSON.parse(xhr.responseText || '{}');
+        } catch {
+          /* เซิร์ฟเวอร์ตอบไม่ใช่ JSON ใช้ข้อความตามสถานะแทน */
+        }
+        if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+        else reject(new Error(data.error || `อัปโหลดไม่สำเร็จ (${xhr.status})`));
+      };
+      xhr.onerror = () => reject(new Error('เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ'));
+      xhr.send(form);
+    }),
 };

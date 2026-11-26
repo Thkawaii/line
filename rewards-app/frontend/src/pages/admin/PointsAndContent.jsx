@@ -18,6 +18,7 @@ import { dateTime, num, signedPoints, thaiDate } from '../../lib/format';
 import { approverGroup, canAdjustPoints, canRequestPointAdjust } from '../../lib/org';
 import { SpecialPointIcon } from '../../components/SpecialPoints';
 import { useAuth } from '../../context/AuthContext';
+import DateField from '../../components/DateField';
 
 export function AdminPoints() {
   const toast = useToast();
@@ -382,9 +383,8 @@ export function AdminPoints() {
               <label className="label mt-3" htmlFor="adjustExpire">
                 คะแนนพิเศษหมดอายุวันที่
               </label>
-              <input
+              <DateField
                 id="adjustExpire"
-                type="date"
                 className="field"
                 value={form.expireAt}
                 onChange={(e) => setForm({ ...form, expireAt: e.target.value })}
